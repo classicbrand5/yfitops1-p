@@ -19,7 +19,7 @@ jobs:
           cache: 'npm'            # enables faster installs
 
       - name: Install dependencies
-        run: npm ci               # uses the committed lockfile for reproducibility
+        run: npm install               # uses the committed lockfile for reproducibility
 
       - name: Build the project
         run: npm run build
