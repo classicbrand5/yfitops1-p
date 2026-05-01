@@ -97,7 +97,18 @@ export function useWebContainer() {
 
       const hasPackageJson = await exists('/package.json');
       if (!hasPackageJson) {
-        // Fresh workspace — write seed files
+        // Fresh workspace — ensure directories exist before writing files
+        const wc = await getWebContainer();
+        const wcWithFs = wc as { fs: { mkdir(path: string, opts?: { recursive?: boolean }): Promise<void> } };
+        for (const dir of ['/src', '/public']) {
+          try {
+            await wcWithFs.fs.mkdir(dir, { recursive: true });
+          } catch {
+            // Directory may already exist — ignore
+          }
+        }
+
+        // Write seed files
         for (const [path, content] of Object.entries(SEED_FILES)) {
           await writeFile(path, content);
         }

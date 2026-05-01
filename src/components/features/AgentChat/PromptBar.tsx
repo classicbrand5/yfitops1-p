@@ -24,7 +24,12 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      // Plain Enter sends (Shift+Enter inserts newline)
+      e.preventDefault();
+      handleSend();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      // Ctrl/Cmd+Enter also sends
       e.preventDefault();
       handleSend();
     }
@@ -103,7 +108,7 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
             value={value}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            placeholder="Write your next task… (Ctrl+Enter to send)"
+            placeholder="Write your next task… (Enter to send, Shift+Enter for newline)"
             rows={1}
             disabled={isThinking}
             className="w-full resize-none outline-none rounded-lg px-3 py-2.5 text-sm transition-all"

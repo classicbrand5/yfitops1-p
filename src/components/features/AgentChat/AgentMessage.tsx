@@ -4,6 +4,7 @@ import { ActionCard } from './ActionCard';
 import { Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { executeActions } from '@/core/agent/agentExecutor';
 import { useAppStore } from '@/store/useAppStore';
+import { useFileSystem } from '@/hooks/useFileSystem';
 import { toast } from 'sonner';
 import type { ConversationMessage } from '@/types/agent.types';
 
@@ -42,6 +43,7 @@ function SimpleMarkdown({ content }: { content: string }) {
 export function AgentMessage({ message }: AgentMessageProps) {
   const [copied, setCopied] = useState(false);
   const { agentAutonomy, appendTerminalOutput, activeTerminalId, updateActionStatus, addNotification } = useAppStore();
+  const { refreshTree } = useFileSystem();
   const isUser = message.role === 'user';
 
   async function handleCopy() {
@@ -67,6 +69,13 @@ export function AgentMessage({ message }: AgentMessageProps) {
         },
         requestConfirmation: async () => true,
       });
+
+      // Refresh file tree after any action that touches the filesystem
+      const fsActions = ['write_file', 'edit_file', 'delete_file', 'create_dir'];
+      if (fsActions.includes(action.type)) {
+        await refreshTree();
+      }
+
       addNotification({ type: 'success', title: 'Action completed', message: action.explanation });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
