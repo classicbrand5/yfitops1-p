@@ -2,7 +2,7 @@ name: Deploy to Cloudflare Pages
 
 on:
   push:
-    branches: [main]   # change to 'master' if that's your default branch
+    branches: [main]
 
 jobs:
   deploy:
@@ -15,21 +15,32 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'      # or 22, depending on your project
-          cache: 'npm'            # enables faster installs
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Install dependencies
-        run: npm install               # uses the committed lockfile for reproducibility
+      # ----- Auto‑update lockfile (if needed) -----
+      - name: Install dependencies (regenerates lockfile)
+        run: npm install
 
+      - name: Commit updated lockfile
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update package-lock.json [skip ci]"
+          file_pattern: "package-lock.json"
+          commit_options: '--no-verify'
+          skip_dirty_check: false
+          # Only commits if package-lock.json changed
+
+      # ----- Build and deploy -----
       - name: Build the project
         run: npm run build
-        # After this, the 'dist' folder contains the built files and public/_headers
+        # dist/ now contains the built app and public/_headers
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: yfitops1          # must match the project name you created on Cloudflare
-          directory: dist                      # the folder to deploy
+          projectName: yfitops1          # Must exist in Cloudflare Pages
+          directory: dist
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
