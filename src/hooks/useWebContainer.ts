@@ -1,53 +1,163 @@
-// src/hooks/useWebContainer.ts
-import { useEffect, useRef, useState } from 'react';
+// src/hooks/useWebContainer.ts — Phase 3: real boot with progress states + seed files
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { getWebContainer, isWebContainerReady } from '@/core/webcontainer/webcontainer';
-import { buildFileTree } from '@/core/webcontainer/fs';
+import { buildFileTree, writeFile, exists } from '@/core/webcontainer/fs';
+import { toast } from 'sonner';
 
-export type WebContainerStatus = 'idle' | 'booting' | 'ready' | 'error';
+export type WebContainerStatus = 'idle' | 'booting' | 'seeding' | 'ready' | 'error';
+
+interface BootProgress {
+  step: string;
+  percent: number;
+}
+
+// ── Seed files written on first boot ──────────────────────────
+const SEED_FILES: Record<string, string> = {
+  '/package.json': JSON.stringify({
+    name: 'yfitops-workspace',
+    version: '0.0.1',
+    private: true,
+    scripts: {
+      dev: 'node server.js',
+      test: 'echo "No tests configured yet"',
+      build: 'echo "No build configured yet"',
+    },
+    dependencies: {},
+    devDependencies: {},
+  }, null, 2),
+  '/README.md': `# YFitOps Workspace
+
+Welcome to your **YFitOps AI Agent** workspace.
+
+## Getting Started
+
+Ask the AI agent anything — it can:
+- Write and edit files in this workspace
+- Run terminal commands
+- Search your codebase
+- Propose and apply code changes
+
+## Tips
+
+- Use \`Ctrl+Enter\` to send a message to the AI
+- Use \`Ctrl+K\` to open the command palette
+- Right-click files in the explorer for context menu actions
+`,
+  '/src/index.ts': `// Your workspace entry point
+// The AI agent will help you build from here.
+
+console.log("YFitOps workspace ready");
+`,
+  '/.gitignore': `node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.local
+.env
+.env.local
+`,
+};
 
 export function useWebContainer() {
   const [status, setStatus] = useState<WebContainerStatus>(
     isWebContainerReady() ? 'ready' : 'idle'
   );
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<BootProgress>({ step: '', percent: 0 });
   const bootedRef = useRef(false);
-  const { setWorkspaceReady, setFileTree } = useAppStore();
+  const { setWorkspaceReady, setFileTree, addNotification } = useAppStore();
 
-  async function boot() {
-    if (bootedRef.current || isWebContainerReady()) return;
+  const boot = useCallback(async () => {
+    if (bootedRef.current || isWebContainerReady()) {
+      // Already booted — just refresh tree
+      if (isWebContainerReady()) {
+        const tree = await buildFileTree('/');
+        setFileTree(tree);
+        setStatus('ready');
+        setWorkspaceReady(true);
+      }
+      return;
+    }
     bootedRef.current = true;
     setStatus('booting');
+    setError(null);
 
     try {
+      // Step 1: Boot WebContainer
+      setProgress({ step: 'Starting WebContainer runtime…', percent: 10 });
       await getWebContainer();
+
+      setProgress({ step: 'Runtime ready — checking workspace…', percent: 40 });
+
+      // Step 2: Seed files if this is a fresh workspace
+      setStatus('seeding');
+      setProgress({ step: 'Setting up workspace files…', percent: 60 });
+
+      const hasPackageJson = await exists('/package.json');
+      if (!hasPackageJson) {
+        // Fresh workspace — write seed files
+        for (const [path, content] of Object.entries(SEED_FILES)) {
+          await writeFile(path, content);
+        }
+        setProgress({ step: 'Workspace initialized…', percent: 80 });
+      }
+
+      // Step 3: Build initial file tree
+      setProgress({ step: 'Scanning file system…', percent: 90 });
+      const tree = await buildFileTree('/');
+      setFileTree(tree);
+
+      setProgress({ step: 'Ready', percent: 100 });
       setStatus('ready');
       setWorkspaceReady(true);
 
-      // Initial file tree scan
-      const tree = await buildFileTree('/');
-      setFileTree(tree);
+      addNotification({
+        type: 'success',
+        title: 'Workspace ready',
+        message: 'WebContainer booted and file system is available.',
+      });
+
+      console.log('[WebContainer] Fully initialized');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error('[WebContainer] Boot error:', err);
       setStatus('error');
       setError(msg);
       setWorkspaceReady(false, msg);
-      console.error('[WebContainer] Boot error:', err);
+      bootedRef.current = false; // allow retry
+
+      // Don't throw — show error in UI + toast
+      toast.error('WebContainer failed to start', {
+        description: msg.slice(0, 120),
+        action: { label: 'Retry', onClick: () => void boot() },
+        duration: 10_000,
+      });
     }
-  }
+  }, [setWorkspaceReady, setFileTree, addNotification]);
 
-  async function refreshFileTree() {
+  const refreshFileTree = useCallback(async () => {
     if (!isWebContainerReady()) return;
-    const tree = await buildFileTree('/');
-    setFileTree(tree);
-  }
+    try {
+      const tree = await buildFileTree('/');
+      setFileTree(tree);
+    } catch (err) {
+      console.error('[FS] buildFileTree error:', err);
+    }
+  }, [setFileTree]);
 
+  // Auto-boot on workspace page
   useEffect(() => {
-    // Auto-boot when hook is first used in workspace
-    if (typeof window !== 'undefined' && window.location.pathname.includes('/workspace')) {
+    if (
+      typeof window !== 'undefined' &&
+      window.location.pathname.includes('/workspace') &&
+      !bootedRef.current &&
+      !isWebContainerReady()
+    ) {
       void boot();
     }
-  }, []);
+  }, [boot]);
 
-  return { status, error, boot, refreshFileTree };
+  return { status, error, progress, boot, refreshFileTree };
 }
