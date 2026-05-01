@@ -217,7 +217,7 @@ export function CodeEditor() {
             </div>
           }
           options={{
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
             fontSize: 14,
             lineHeight: 22,
             letterSpacing: 0.3,

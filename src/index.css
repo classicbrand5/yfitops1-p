@@ -56,8 +56,8 @@
   --text-accent:    #00F5A0;
 
   /* ── Typography ── */
-  --font-display: 'Orbitron', sans-serif;
-  --font-body:    'DM Sans', sans-serif;
+  --font-display: 'Space Grotesk', sans-serif;
+  --font-body:    'Inter', sans-serif;
   --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
 
   /* ── Radius ── */
