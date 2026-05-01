@@ -1,21 +1,24 @@
 // src/components/features/AgentChat/PromptBar.tsx
 import React, { useRef, useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { Paperclip, Send, Zap, Database, FolderOpen, GitBranch, TerminalSquare } from 'lucide-react';
+import { Paperclip, Send, Database, FolderOpen, GitBranch, TerminalSquare } from 'lucide-react';
 
 interface PromptBarProps {
   onSend: (message: string) => void;
   isThinking: boolean;
+  isAuthenticated?: boolean;
 }
 
-export function PromptBar({ onSend, isThinking }: PromptBarProps) {
+export function PromptBar({ onSend, isThinking, isAuthenticated = true }: PromptBarProps) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { agentContext, updateAgentContext } = useAppStore();
 
+  const isDisabled = isThinking || !isAuthenticated;
+
   function handleSend() {
     const trimmed = value.trim();
-    if (!trimmed || isThinking) return;
+    if (!trimmed || isDisabled) return;
     onSend(trimmed);
     setValue('');
     if (textareaRef.current) {
@@ -48,13 +51,15 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
   const charCount = value.length;
   const maxChars = 4000;
 
+  const canSend = value.trim().length > 0 && !isDisabled;
+
   type ContextKey = 'includeOpenFiles' | 'includeBuildStatus' | 'includeTerminalOutput' | 'includeGitHistory';
 
   const contextToggles: Array<{ key: ContextKey; label: string; icon: React.ElementType }> = [
-    { key: 'includeOpenFiles',     label: 'files',    icon: FolderOpen },
-    { key: 'includeBuildStatus',   label: 'builds',   icon: Database },
-    { key: 'includeTerminalOutput',label: 'terminal', icon: TerminalSquare },
-    { key: 'includeGitHistory',    label: 'git',      icon: GitBranch },
+    { key: 'includeOpenFiles',      label: 'files',    icon: FolderOpen },
+    { key: 'includeBuildStatus',    label: 'builds',   icon: Database },
+    { key: 'includeTerminalOutput', label: 'terminal', icon: TerminalSquare },
+    { key: 'includeGitHistory',     label: 'git',      icon: GitBranch },
   ];
 
   return (
@@ -76,10 +81,12 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
                 border: `1px solid ${isActive ? 'rgba(0,245,160,0.25)' : 'var(--border-subtle)'}`,
                 color: isActive ? 'var(--accent-400)' : 'var(--text-muted)',
                 fontFamily: 'var(--font-body)',
+                opacity: !isAuthenticated ? 0.4 : 1,
               }}
-              onClick={() => updateAgentContext({ [key]: !isActive })}
+              onClick={() => isAuthenticated && updateAgentContext({ [key]: !isActive })}
               aria-pressed={isActive}
               aria-label={`${isActive ? 'Disable' : 'Enable'} ${label} context`}
+              disabled={!isAuthenticated}
             >
               <Icon size={9} aria-hidden="true" />
               {label}
@@ -94,9 +101,16 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
         {/* Attach */}
         <button
           className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:opacity-80"
-          style={{ color: 'var(--text-muted)', background: 'var(--bg-input)', border: '1px solid var(--border-default)' }}
+          style={{
+            color: 'var(--text-muted)',
+            background: 'var(--bg-input)',
+            border: '1px solid var(--border-default)',
+            opacity: !isAuthenticated ? 0.4 : 1,
+            cursor: !isAuthenticated ? 'not-allowed' : 'pointer',
+          }}
           aria-label="Attach file"
-          title="Attach file from workspace"
+          title={isAuthenticated ? 'Attach file from workspace' : 'Sign in required'}
+          disabled={!isAuthenticated}
         >
           <Paperclip size={14} />
         </button>
@@ -108,13 +122,19 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
             value={value}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            placeholder="Write your next task… (Enter to send, Shift+Enter for newline)"
+            placeholder={
+              !isAuthenticated
+                ? 'Sign in to use the AI agent…'
+                : isThinking
+                  ? 'Agent is thinking…'
+                  : 'Write your next task… (Enter to send, Shift+Enter for newline)'
+            }
             rows={1}
-            disabled={isThinking}
+            disabled={isDisabled}
             className="w-full resize-none outline-none rounded-lg px-3 py-2.5 text-sm transition-all"
             style={{
               background: 'var(--bg-input)',
-              border: `1px solid ${value.length > 0 ? 'var(--border-accent)' : 'var(--border-default)'}`,
+              border: `1px solid ${value.length > 0 && !isDisabled ? 'var(--border-accent)' : 'var(--border-default)'}`,
               color: 'var(--text-primary)',
               fontFamily: 'var(--font-body)',
               caretColor: 'var(--accent-400)',
@@ -122,16 +142,21 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
               maxHeight: 140,
               lineHeight: 1.5,
               fontSize: 14,
-              opacity: isThinking ? 0.6 : 1,
+              opacity: isDisabled ? 0.5 : 1,
+              cursor: !isAuthenticated ? 'not-allowed' : 'text',
             }}
             aria-label="Message input"
-            aria-disabled={isThinking}
+            aria-disabled={isDisabled}
             maxLength={maxChars}
           />
           {charCount > 800 && (
             <span
               className="absolute bottom-2 right-2 text-xs"
-              style={{ color: charCount > maxChars * 0.9 ? 'var(--warning)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 10 }}
+              style={{
+                color: charCount > maxChars * 0.9 ? 'var(--warning)' : 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+              }}
               aria-live="polite"
             >
               {charCount}/{maxChars}
@@ -143,16 +168,16 @@ export function PromptBar({ onSend, isThinking }: PromptBarProps) {
         <button
           className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg transition-all"
           style={{
-            background: value.trim() && !isThinking ? 'var(--accent-400)' : 'var(--bg-input)',
-            border: `1px solid ${value.trim() && !isThinking ? 'transparent' : 'var(--border-default)'}`,
-            color: value.trim() && !isThinking ? 'var(--text-inverse)' : 'var(--text-muted)',
-            boxShadow: value.trim() && !isThinking ? 'var(--shadow-accent)' : 'none',
-            cursor: value.trim() && !isThinking ? 'pointer' : 'not-allowed',
+            background: canSend ? 'var(--accent-400)' : 'var(--bg-input)',
+            border: `1px solid ${canSend ? 'transparent' : 'var(--border-default)'}`,
+            color: canSend ? 'var(--text-inverse)' : 'var(--text-muted)',
+            boxShadow: canSend ? 'var(--shadow-accent)' : 'none',
+            cursor: canSend ? 'pointer' : 'not-allowed',
           }}
           onClick={handleSend}
-          disabled={!value.trim() || isThinking}
-          aria-label="Send message (Ctrl+Enter)"
-          title="Send (Ctrl+Enter)"
+          disabled={!canSend}
+          aria-label={isAuthenticated ? 'Send message (Enter)' : 'Sign in to send messages'}
+          title={isAuthenticated ? 'Send (Enter)' : 'Sign in required'}
         >
           <Send size={14} />
         </button>

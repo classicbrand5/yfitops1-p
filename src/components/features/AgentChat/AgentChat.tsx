@@ -5,7 +5,7 @@ import { AgentMessage } from './AgentMessage';
 import { AgentThinking } from './AgentThinking';
 import { PromptBar } from './PromptBar';
 import { useAppStore } from '@/store/useAppStore';
-import { Plus, MessageSquare, Trash2 } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, LogIn } from 'lucide-react';
 
 export function AgentChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -14,6 +14,7 @@ export function AgentChat() {
     activeConversationId,
     activeMessages,
     isThinking,
+    isAuthenticated,
     createConversation,
     sendMessage,
     clearChat,
@@ -88,6 +89,41 @@ export function AgentChat() {
         </div>
       </div>
 
+      {/* Auth banner — shown when user is not signed in */}
+      {!isAuthenticated && (
+        <div
+          className="flex items-center gap-3 px-4 py-3 border-b flex-shrink-0"
+          style={{
+            background: 'rgba(255,77,109,0.06)',
+            borderColor: 'rgba(255,77,109,0.2)',
+          }}
+          role="alert"
+        >
+          <LogIn size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium" style={{ color: 'var(--danger)', fontFamily: 'var(--font-body)' }}>
+              Sign in required
+            </p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+              The AI agent requires authentication.
+            </p>
+          </div>
+          <a
+            href="/auth"
+            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all hover:opacity-80"
+            style={{
+              background: 'rgba(255,77,109,0.12)',
+              border: '1px solid rgba(255,77,109,0.25)',
+              color: 'var(--danger)',
+              fontFamily: 'var(--font-body)',
+              textDecoration: 'none',
+            }}
+          >
+            Sign in
+          </a>
+        </div>
+      )}
+
       {/* Messages */}
       <div
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
@@ -140,7 +176,7 @@ export function AgentChat() {
       </div>
 
       {/* Input */}
-      <PromptBar onSend={handleSend} isThinking={isThinking} />
+      <PromptBar onSend={handleSend} isThinking={isThinking} isAuthenticated={isAuthenticated} />
     </div>
   );
 }
