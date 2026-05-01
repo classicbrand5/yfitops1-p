@@ -6,7 +6,7 @@ on:
 
 # Grant write access so the workflow can push the updated lockfile
 permissions:
-  contents: write   # allows pushing commits
+  contents: write
 
 jobs:
   deploy:
@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # fetch full history so rebase/force-push can work
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,7 +34,8 @@ jobs:
           commit_message: "chore: update package-lock.json [skip ci]"
           file_pattern: "package-lock.json"
           commit_options: '--no-verify'
-          # Only commits if package-lock.json changed
+          push_options: '--force'           # force-push the lockfile commit if branch diverged
+          skip_fetch: false
 
       # ----- Build and deploy -----
       - name: Build the project
@@ -45,4 +48,4 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: yfitops1
           directory: dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          # gitHubToken removed — not needed and caused permission error
