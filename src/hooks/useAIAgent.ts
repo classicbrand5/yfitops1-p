@@ -81,36 +81,35 @@ export function useAIAgent() {
     setStreamingMessageId(assistantMsgId);
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
-
-      if (!supabaseUrl || !supabaseAnonKey) {
+      const { supabase, isSupabaseReady } = await import('@/lib/supabase');
+      if (!isSupabaseReady || !supabase) {
         throw new Error('Supabase not configured — connect your project to enable AI agent');
       }
 
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/agent-inference`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            messages: history,
-            conversationId: targetConvId,
-            expertMode,
-            workspaceContext: agentContext,
-          }),
-        }
-      );
+      const { data, error } = await supabase.functions.invoke('agent-inference', {
+        body: {
+          messages: history,
+          conversationId: targetConvId,
+          expertMode,
+          workspaceContext: agentContext,
+        },
+      });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: response.statusText })) as { error?: string };
-        throw new Error(errData.error ?? `HTTP ${response.status}`);
+      if (error) {
+        let msg = error.message;
+        // Extract real error text from edge function HTTP errors
+        if ('context' in error && error.context) {
+          try {
+            const ctx = error.context as { status?: number; text?: () => Promise<string> };
+            const status = ctx.status ?? 500;
+            const text = await ctx.text?.();
+            msg = `[${status}] ${text || error.message}`;
+          } catch { /* ignore */ }
+        }
+        throw new Error(msg);
       }
 
-      const raw: unknown = await response.json();
+      const raw: unknown = data;
       const parsed: AgentResponse = validateAgentResponse(raw);
 
       updateMessage(targetConvId, assistantMsgId, {

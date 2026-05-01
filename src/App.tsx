@@ -1,27 +1,27 @@
+// src/App.tsx — Route definitions + auth guard
 import React, { lazy, Suspense } from 'react';
 import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useAppStore } from '@/store/useAppStore';
+import { useAuth } from '@/hooks/useAuth';
 import NotFound from './pages/NotFound';
 
 // Lazy-loaded pages for code splitting
-const Landing = lazy(() => import('./pages/Landing'));
-const Auth = lazy(() => import('./pages/Auth'));
+const Landing    = lazy(() => import('./pages/Landing'));
+const Auth       = lazy(() => import('./pages/Auth'));
 const WorkspacePage = lazy(() => import('./pages/WorkspacePage'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Analytics = lazy(() => import('./pages/Analytics'));
+const Dashboard  = lazy(() => import('./pages/Dashboard'));
+const Analytics  = lazy(() => import('./pages/Analytics'));
 const BuildMonitor = lazy(() => import('./pages/BuildMonitor'));
-const Settings = lazy(() => import('./pages/Settings'));
-const Billing = lazy(() => import('./pages/Billing'));
+const Settings   = lazy(() => import('./pages/Settings'));
+const Billing    = lazy(() => import('./pages/Billing'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 60_000,
-    },
+    queries: { retry: 1, staleTime: 60_000 },
   },
 });
 
@@ -40,11 +40,40 @@ function PageLoader() {
   );
 }
 
+/** Redirect unauthenticated users to /auth */
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, isAuthLoading } = useAppStore();
+  const location = useLocation();
+
+  // Boot the auth hook globally (runs once, registers listener)
+  useAuth();
+
+  if (isAuthLoading) return <PageLoader />;
+  if (!user) return <Navigate to="/auth" state={{ from: location }} replace />;
+  return <>{children}</>;
+}
+
+/** Redirect authenticated users away from /auth */
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const { user, isAuthLoading } = useAppStore();
+  useAuth();
+  if (isAuthLoading) return <PageLoader />;
+  if (user) return <Navigate to="/workspace" replace />;
+  return <>{children}</>;
+}
+
+/** Boot auth subscription once at the top level */
+function AuthBootstrap() {
+  useAuth();
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner
+        position="bottom-right"
         toastOptions={{
           style: {
             background: 'var(--bg-elevated)',
@@ -55,17 +84,71 @@ const App = () => (
         }}
       />
       <BrowserRouter>
+        <AuthBootstrap />
         <Suspense fallback={<PageLoader />}>
           <Routes>
+            {/* Public */}
             <Route path="/" element={<Landing />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/workspace" element={<WorkspacePage />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/builds" element={<BuildMonitor />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/billing" element={<Billing />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route
+              path="/auth"
+              element={
+                <PublicRoute>
+                  <Auth />
+                </PublicRoute>
+              }
+            />
+
+            {/* Protected */}
+            <Route
+              path="/workspace"
+              element={
+                <ProtectedRoute>
+                  <WorkspacePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/analytics"
+              element={
+                <ProtectedRoute>
+                  <Analytics />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/builds"
+              element={
+                <ProtectedRoute>
+                  <BuildMonitor />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/billing"
+              element={
+                <ProtectedRoute>
+                  <Billing />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Catch-all */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
