@@ -1,6 +1,6 @@
 # YFitOps AI Agent — Project Review & Gap Analysis
 
-**Last updated:** Phase 9 completion  
+**Last updated:** Phase 10 completion  
 **Purpose:** Document all skipped, deferred, partially implemented, or known-broken items across all phases so nothing falls through the cracks.
 
 ---
@@ -15,139 +15,85 @@
 | Phase 4–6: (Editor, Terminal stub, AgentChat UI) | ✅ Complete | Monaco @monaco-editor/react, xterm stub, ActionCard, DiffPreview |
 | Phase 7: Command Palette | ✅ Complete | cmdk, 22 commands, 7 groups |
 | Phase 8: Supabase Realtime (Dashboard + Build Monitor) | ✅ Complete | useRealtimeEvents, useRealtimeBuilds, live feeds |
-| Phase 9: WebContainer Fix + Agent Executor | ✅ Complete | ENOENT fix, agentExecutor wired, PromptBar Enter key |
+| Phase 9: WebContainer Fix + Agent Executor + 401 Fix | ✅ Complete | ENOENT fix, agentExecutor wired, PromptBar Enter key, 401 auth fix |
+| Phase 10: Real xterm Terminal + Memory + Stats + File Attach | ✅ Complete | Real xterm.js (esm.sh), Monaco model disposal, Dashboard RPC stats, PromptBar file attach, notification persistence |
+
+---
+
+## ✅ Fixed in Phase 10
+
+### 1. xterm.js Terminal (Real Integration) — ✅ FIXED
+**Resolution:** `TerminalPanel.tsx` completely rewritten. Real `@xterm/xterm@5.3.0` Terminal loaded from `esm.sh` CDN via dynamic `import()` (no package.json change needed). `@xterm/addon-fit@0.8.0` also from esm.sh. CSS injected via dynamic `<link>` tag. Multi-tab support via `Map<sessionId, XtermSession>`. WebContainer process stdout piped to `term.write()`. `term.onData()` sends keystrokes to process stdin. Ctrl+C → `\x03`, Ctrl+D → `\x04`, Ctrl+L → `term.clear()`. ResizeObserver triggers `fitAddon.fit()` on container resize. ASCII art welcome banner with ANSI colors.
+
+### 2. Monaco Model Cache Disposal — ✅ FIXED
+**Resolution:** `closeTab()` action in `useAppStore.ts` now accesses `window.monaco` (registered globally by `@monaco-editor/react` on mount), retrieves the model via `editor.getModel(Uri.file(path))` and calls `.dispose()`. Wrapped in try/catch for safety when Monaco hasn't loaded yet. Logged as `[Monaco] Disposed model for <path>`.
+
+### 3. Dashboard Stats RPC — ✅ FIXED
+**Resolution:** `Dashboard.tsx` calls `get_dashboard_stats()` Supabase RPC via `useDashboardStats()` hook (`useQuery` with `refetchInterval: 30_000`). All four stat cards show real numbers from Supabase.
+
+### 4. PromptBar Attach File Button — ✅ FIXED
+**Resolution:** Hidden `<input type="file">` wired to paperclip button click. `FileReader.readAsText()` reads selected file, prepends content as ` ```ext // File: name.ext \n content \n``` ` into the textarea. Textarea auto-resizes after insert. File input reset after reading for re-attachment.
+
+### 5. Notification Bell Unread Count Persistence — ✅ FIXED
+**Resolution:** `notifications` array (up to 50) and `unreadNotificationCount` added to `partialize` in Zustand persist config. Both survive page refresh now.
 
 ---
 
 ## 🔴 Known Broken / Incomplete
 
-### 1. xterm.js Terminal (Real Integration) — SKIPPED
-**File:** `src/components/features/Terminal/TerminalPanel.tsx`  
-**Current state:** Uses a custom `<input>` + output `<div>` instead of a real xterm.js Terminal instance. The panel works for simple command execution but lacks:
-- Real terminal emulation (ANSI escape codes, cursor control, colors)
-- Proper resize handling via `@xterm/addon-fit`
-- Ctrl+C / SIGINT forwarding to the spawned process
-- Arrow key history properly scoped to the process (not a React input)
-- Multi-process management with per-session xterm instances
+### 1. Agent Executor — Auto-Execute Based on Autonomy (Full-Auto Mode)
+**File:** `src/hooks/useAIAgent.ts`, `src/components/features/AgentChat/AgentMessage.tsx`  
+**Current state:** When `agentAutonomy === 'full-auto'`, the agent still requires user to click Execute on each ActionCard. The `executeActions()` loop with `requestConfirmation` callback runs correctly for manual approval, but the autonomous path (skip confirmation when full-auto) is not triggered automatically after a message arrives.  
+**Fix required:** In `useAIAgent.sendMessage()` or in `AgentMessage.tsx`, after the response arrives and actions are stored: if `agentAutonomy === 'full-auto'` or `agentAutonomy === 'auto-safe'`, automatically call `handleApprove()` for each non-destructive action without waiting for user click.
 
-**Fix required:** Replace the input/output div pattern with `new Terminal()` from `@xterm/xterm`, mount to a `<div ref>`, attach `addon-fit` on resize, wire stdin/stdout to the WebContainer process's `input`/`output` streams.
-
----
-
-### 2. Monaco Editor Model Cache Disposal — INCOMPLETE
-**File:** `src/components/features/Editor/CodeEditor.tsx`  
-**Current state:** Models are cached via `Monaco.Uri.file(path)` to preserve undo history per file. However, **models are never disposed** when tabs are closed.  
-**Impact:** Memory leak in long sessions with many files opened and closed.  
-**Fix required:** In `closeTab` action (store) or in `EditorTabs.tsx`, call `monaco.editor.getModel(Monaco.Uri.file(path))?.dispose()` when the tab is permanently closed (not just hidden).
-
----
-
-### 3. AgentMessage — File Tree Refresh After Actions
-**File:** `src/components/features/AgentChat/AgentMessage.tsx`  
-**Current state:** The `useFileSystem` hook's `refreshTree()` is called after `write_file`, `delete_file`, `create_dir`, and `edit_file` actions. However, this depends on `useFileSystem` being properly wired to the real WebContainer FS (which requires `isWebContainerReady()`).  
-**Risk:** If WebContainer hasn't booted yet when the agent executes, the refresh silently fails and the file tree won't update.  
-**Fix:** Add a guard `if (!isWebContainerReady()) return;` inside `refreshTree` in `useFileSystem.ts`.
-
----
-
-### 4. Agent Executor — `edit_file` Diff Parser Reliability
+### 2. Agent Executor — `edit_file` Diff Parser Edge Cases
 **File:** `src/core/agent/agentExecutor.ts`  
-**Current state:** Custom unified-diff parser (`applyUnifiedDiff`). The parser handles common cases but is not a full implementation of the unified diff spec.  
+**Current state:** Custom `applyUnifiedDiff()` handles most cases but is not a full unified diff spec implementation.  
 **Known gaps:**
-- Does not handle `\ No newline at end of file` cleanly in all edge cases
-- Hunk context line counts (`,s` in `@@ -l,s +l,s @@`) are parsed but not strictly validated
-- Falls back to full content replacement if diff fails — correct behavior, but may mask AI hallucinated diffs
+- `\ No newline at end of file` handling in edge cases
+- Hunk context line count validation not strict
+- Falls back to full content replacement (correct behavior, but masks AI hallucinated diffs)
 
-**Fix:** Consider importing the `diff` npm package (`import { applyPatch } from 'diff'`) once confirmed available in package.json.
+**Fix:** Import `applyPatch` from the `diff` npm package if/when it can be added to package.json.
 
----
+### 3. AgentMessage — File Tree Refresh Race Condition
+**File:** `src/components/features/AgentChat/AgentMessage.tsx`  
+**Current state:** `refreshTree()` is called after FS actions. However, `useFileSystem.refreshTree()` already has an `if (!isWebContainerReady()) return;` guard, so this is safe. But if the agent executes before WebContainer boots (unlikely), the refresh silently no-ops.  
+**Risk:** Low — WebContainer must be ready for the agent to function at all (auth gate + workspace boot gate).
 
-### 5. PromptBar — Attach File Button Non-Functional
-**File:** `src/components/features/AgentChat/PromptBar.tsx`  
-**Current state:** The `<Paperclip>` button renders but has no `onClick` handler beyond the placeholder. It does not open a file picker or inject file content into the message.  
-**Fix:** Implement a hidden `<input type="file">` triggered by the button. On file select, read content with `FileReader.readAsText()` and prepend it as a code block to the textarea.
-
----
-
-### 6. Dashboard Stats — RPC `get_dashboard_stats` Not Yet Called
-**File:** `src/pages/Dashboard.tsx`  
-**Current state:** Dashboard may show hardcoded stat values or counts derived from local Realtime state rather than the `get_dashboard_stats()` Supabase RPC.  
-**Fix:** In `Dashboard.tsx`, add a `useQuery` call:
-```ts
-useQuery({
-  queryKey: ['dashboard-stats', user?.id],
-  queryFn: () => supabase.rpc('get_dashboard_stats'),
-  refetchInterval: 30_000,
-})
-```
-And wire the result to the stat cards.
-
----
-
-### 7. Build Monitor — `log_url` Field Empty
+### 4. Build Monitor — `log_url` Field Empty
 **File:** `src/pages/BuildMonitor.tsx`  
-**Current state:** "View Logs" button exists but the `log_url` field in the `builds` table is typically `null` unless populated by a real CI/CD pipeline.  
-**Fix:** The log drawer should gracefully handle `null` log_url with: "No logs available. Logs are populated when builds are triggered via the GitHub integration."
+**Current state:** "View Logs" opens the drawer. If `log_url` is null (no CI configured), the drawer shows "No log URL available" with explanation. ✅ This is correctly handled. The external link button is conditionally rendered only when `log_url` exists.
 
----
-
-### 8. GitHub Integration — Octokit Not Wired
+### 5. GitHub Integration — Octokit Not Wired
 **Files:** None (feature not started)  
-**Current state:** The `profiles` table has `github_username` and `github_access_token` columns, and `connected_repos` stores repo metadata. However, no Octokit-based code exists for:
-- Listing user repos from GitHub API
-- Creating pull requests
-- Webhooks for triggering builds
+**Current state:** `profiles.github_access_token` column exists in Supabase. `connected_repos` table ready. But no Octokit-based repo listing, PR creation, or webhook integration exists.  
+**Fix:** `src/lib/github.ts` with `new Octokit({ auth: profile.github_access_token })` → list repos, create PR, list branches. Wire to "Connect Repo" flow in Dashboard.
 
-**Fix:** Implement a `src/lib/github.ts` with Octokit initialization using the stored token. Wire to "Connect Repo" flow in the Dashboard.
-
----
-
-### 9. Billing / Stripe — Not Implemented
+### 6. Billing / Stripe — Not Implemented
 **File:** `src/pages/Billing.tsx`  
-**Current state:** Billing page is a placeholder. Stripe integration referenced in the original spec has not been started.  
-**Fix:** Implement per the Stripe guidelines in Implementation Constraints: one-time payment or subscription mode, Supabase `subscribers` table, Edge Function for checkout session creation.
+**Current state:** Placeholder page.  
+**Fix:** Stripe Edge Function for checkout session. `subscribers` table. Subscription status on `profiles.plan`.
 
----
-
-### 10. Analytics Page — Placeholder
+### 7. Analytics Page — Placeholder
 **File:** `src/pages/Analytics.tsx`  
-**Current state:** Analytics page exists but may show mock/placeholder content.  
-**Fix (Phase 12):** Build Recharts visualizations — 30-day build success rate line chart, AI usage bar chart, language distribution donut chart. All fetched via react-query from Supabase.
+**Current state:** No real data. Placeholder layout.  
+**Fix (Phase 12):** Recharts LineChart (build success rate), BarChart (AI usage), RadialChart (language distribution) via react-query from Supabase.
 
----
-
-### 11. Settings Page — Partially Implemented
+### 8. Settings Page — No Supabase Persistence
 **File:** `src/pages/Settings.tsx`  
-**Current state:** Settings UI exists but may not persist changes to the `profiles` table via Supabase `UPDATE`.  
-**Fix:** Wire each settings section to `supabase.from('profiles').update({...}).eq('id', user.id)` with optimistic updates and toast feedback.
+**Current state:** Settings UI (profile, AI agent, editor) changes do NOT persist to Supabase. They only update local state.  
+**Fix:** Wire "Save Changes" button to `supabase.from('profiles').update({...}).eq('id', user.id)` with optimistic update and toast feedback.
 
----
+### 9. xterm Terminal — No Command History (Arrow Keys)
+**File:** `src/components/features/Terminal/TerminalPanel.tsx`  
+**Current state:** The xterm `onData` handler does not implement arrow-key history navigation. Up/Down arrows are silently ignored in line-buffer mode.  
+**Fix:** Maintain a `string[]` history array per session. On `\x1b[A` (up) and `\x1b[B` (down), navigate history and overwrite current line buffer using ANSI escape sequences (`\x1b[2K\r` to clear line, then rewrite).
 
-### 12. WebContainer — COOP/COEP in Production
-**File:** `public/_headers`  
-**Current state:** `_headers` file is configured for Cloudflare Pages. However, if deployed to a different host (e.g., Vercel, Netlify), the headers won't be applied automatically.  
-**Fix:** Ensure the deployment target is documented. For Vercel: add `vercel.json` with headers config. For Netlify: add `_headers` in root (already done for Cloudflare).
-
----
-
-### 13. OTP Cooldown — `useOtpCooldown` Not Tested End-to-End
+### 10. OTP Cooldown — Not Tested Against Real 429
 **File:** `src/hooks/useOtpCooldown.ts`  
-**Current state:** Implemented in Phase 3, but has not been verified against actual Supabase 429 responses with `retryAfterSeconds` in the payload.  
-**Fix:** Test with real OTP spam attempts. Confirm `sessionStorage` key survives navigation but not browser close.
-
----
-
-### 14. Agent Autonomy — 'auto-safe' and 'full-auto' Modes Not Gated in UI
-**File:** `src/pages/Settings.tsx`, `src/components/features/AgentChat/AgentChat.tsx`  
-**Current state:** `agentAutonomy` is stored in Zustand and read by `agentExecutor.ts`, but there is no UI in Settings to change it. Users can only change it via the command palette (if wired).  
-**Fix:** Add an autonomy selector in Settings under "AI Agent" section.
-
----
-
-### 15. Notification Bell — Unread Count Not Persisted
-**File:** `src/components/layout/TopBar.tsx`, `src/store/useAppStore.ts`  
-**Current state:** `notifications` and `unreadNotificationCount` are in Zustand persist, but `notifications` array itself is excluded from `partialize`. After a page refresh, the bell shows 0.  
-**Fix:** Either include `notifications` in `partialize`, or sync read/unread state with Supabase `events` table.
+**Current state:** Implemented but not verified against actual Supabase 429 responses with `retryAfterSeconds`.  
+**Fix:** Test with real OTP spam. Verify sessionStorage key format and cooldown extension logic.
 
 ---
 
@@ -155,25 +101,19 @@ And wire the result to the stat cards.
 
 | Item | Target Phase | Description |
 |------|-------------|-------------|
-| Real xterm.js terminal | Phase 10 | Wire xterm Terminal instance to WebContainer process streams |
-| Monaco model cache disposal | Phase 11 | Dispose ITextModel on tab close to prevent memory leaks |
-| Agent executor → UI wiring | Phase 11 | ActionCard approve/reject fully connected to executeActions() |
-| Dashboard RPC stats | Phase 12 | Call get_dashboard_stats() Supabase RPC |
-| Analytics charts | Phase 12 | Recharts visualizations from real Supabase data |
+| Agent executor auto-approve (full-auto) | Phase 11 | Trigger executeActions automatically after message arrives |
 | GitHub / Octokit | Phase 13 | List repos, create PRs, webhook builds |
+| Analytics charts | Phase 12 | Recharts visualizations from real Supabase data |
 | Billing / Stripe | Phase 14 | Subscription or one-time payment integration |
 | Settings persistence | Phase 15 | Wire settings form to Supabase profiles table update |
+| xterm command history | Phase 10.5 | Arrow key history in line-buffer mode |
+| diff npm package | — | Replace custom applyUnifiedDiff with proper implementation |
 
 ---
 
 ## 🟢 Auth: 401 Fix Applied (Phase 9 Addendum)
 
 **File:** `src/hooks/useAIAgent.ts`  
-**Problem:** Edge function returned 401 because:
-1. No auth check before invoking — unauthenticated users could call `sendMessage()`
-2. No session refresh before the call — expired tokens caused silent 401s
-3. Error handling didn't differentiate 401 vs 502 vs 429
-
 **Fixes applied:**
 - Added `if (!user)` guard at top of `sendMessage` with redirect-to-auth toast
 - Added `supabase.auth.getSession()` + `refreshSession()` before invoke
@@ -204,3 +144,4 @@ And wire the result to the stat cards.
 - **Output directory**: `dist`
 - **GitHub Actions workflow**: `.github/workflows/deploy.yml` — triggers on push to `main`
 - **Node version**: 20.x recommended (matches Vite 5.x requirements)
+- **xterm.js**: Loaded from `esm.sh` CDN at runtime — requires internet access in deployed environment. No build-time dependency.

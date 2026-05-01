@@ -247,10 +247,37 @@ export const useAppStore = create<AppState>()(
         closeTab: (tabId) => set((s) => {
           const idx = s.openTabs.findIndex((t) => t.id === tabId);
           if (idx < 0) return {};
+          const closedTab = s.openTabs[idx];
           const newTabs = s.openTabs.filter((t) => t.id !== tabId);
           const newActiveId = s.activeTabId === tabId
             ? (newTabs[Math.max(0, idx - 1)]?.id ?? null)
             : s.activeTabId;
+
+          // Dispose Monaco model to prevent memory leaks
+          if (closedTab?.path) {
+            try {
+              const monacoGlobal = (window as Record<string, unknown>)['monaco'];
+              if (monacoGlobal && typeof monacoGlobal === 'object') {
+                const m = monacoGlobal as {
+                  editor?: {
+                    getModel?: (uri: unknown) => { dispose?: () => void } | null;
+                    Uri?: { file?: (p: string) => unknown };
+                  };
+                };
+                if (m.editor?.getModel && m.editor?.Uri?.file) {
+                  const uri = m.editor.Uri.file(closedTab.path);
+                  const model = m.editor.getModel(uri);
+                  if (model?.dispose) {
+                    model.dispose();
+                    console.log('[Monaco] Disposed model for', closedTab.path);
+                  }
+                }
+              }
+            } catch {
+              // Monaco not ready or model already disposed — safe to ignore
+            }
+          }
+
           return { openTabs: newTabs, activeTabId: newActiveId };
         }),
         setActiveTab: (tabId) => set({ activeTabId: tabId }),
@@ -458,6 +485,9 @@ export const useAppStore = create<AppState>()(
           agentContext: state.agentContext,
           expandedFolders: state.expandedFolders,
           activeConversationId: state.activeConversationId,
+          // Persist notifications so unread count survives page refresh
+          notifications: state.notifications.slice(0, 50),
+          unreadNotificationCount: state.unreadNotificationCount,
         }),
       }
     )

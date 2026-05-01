@@ -12,6 +12,7 @@ interface PromptBarProps {
 export function PromptBar({ onSend, isThinking, isAuthenticated = true }: PromptBarProps) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { agentContext, updateAgentContext } = useAppStore();
 
   const isDisabled = isThinking || !isAuthenticated;
@@ -28,11 +29,9 @@ export function PromptBar({ onSend, isThinking, isAuthenticated = true }: Prompt
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      // Plain Enter sends (Shift+Enter inserts newline)
       e.preventDefault();
       handleSend();
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      // Ctrl/Cmd+Enter also sends
       e.preventDefault();
       handleSend();
     }
@@ -40,7 +39,6 @@ export function PromptBar({ onSend, isThinking, isAuthenticated = true }: Prompt
 
   function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setValue(e.target.value);
-    // Auto-resize
     const ta = textareaRef.current;
     if (ta) {
       ta.style.height = 'auto';
@@ -48,9 +46,41 @@ export function PromptBar({ onSend, isThinking, isAuthenticated = true }: Prompt
     }
   }
 
+  // ── File attach ───────────────────────────────────────────────────────────
+  function handleAttachClick() {
+    if (!isAuthenticated) return;
+    fileInputRef.current?.click();
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string;
+      const ext = file.name.split('.').pop() ?? '';
+      const block = `\`\`\`${ext}\n// File: ${file.name}\n${content}\n\`\`\`\n\n`;
+      setValue((prev) => block + prev);
+
+      // Auto-resize textarea
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (ta) {
+          ta.style.height = 'auto';
+          ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`;
+          ta.focus();
+        }
+      });
+    };
+    reader.readAsText(file);
+
+    // Reset input so the same file can be re-attached
+    e.target.value = '';
+  }
+
   const charCount = value.length;
   const maxChars = 4000;
-
   const canSend = value.trim().length > 0 && !isDisabled;
 
   type ContextKey = 'includeOpenFiles' | 'includeBuildStatus' | 'includeTerminalOutput' | 'includeGitHistory';
@@ -69,7 +99,9 @@ export function PromptBar({ onSend, isThinking, isAuthenticated = true }: Prompt
     >
       {/* Context toggles */}
       <div className="flex items-center gap-1.5 px-3 pt-2 pb-1 flex-wrap">
-        <span className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>Context:</span>
+        <span className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+          Context:
+        </span>
         {contextToggles.map(({ key, label, icon: Icon }) => {
           const isActive = agentContext[key];
           return (
@@ -98,7 +130,17 @@ export function PromptBar({ onSend, isThinking, isAuthenticated = true }: Prompt
 
       {/* Input area */}
       <div className="flex items-end gap-2 px-3 py-2">
-        {/* Attach */}
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".ts,.tsx,.js,.jsx,.json,.md,.txt,.css,.html,.py,.go,.rs,.yaml,.yml,.toml,.env,.sh"
+          className="hidden"
+          onChange={handleFileChange}
+          aria-label="Attach file"
+        />
+
+        {/* Attach button */}
         <button
           className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg transition-all hover:opacity-80"
           style={{
@@ -108,8 +150,9 @@ export function PromptBar({ onSend, isThinking, isAuthenticated = true }: Prompt
             opacity: !isAuthenticated ? 0.4 : 1,
             cursor: !isAuthenticated ? 'not-allowed' : 'pointer',
           }}
-          aria-label="Attach file"
-          title={isAuthenticated ? 'Attach file from workspace' : 'Sign in required'}
+          aria-label="Attach file from disk"
+          title={isAuthenticated ? 'Attach file (inserts content into prompt)' : 'Sign in required'}
+          onClick={handleAttachClick}
           disabled={!isAuthenticated}
         >
           <Paperclip size={14} />
