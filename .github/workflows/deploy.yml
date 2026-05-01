@@ -30,6 +30,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: yfitops-build2          # must match the project name you created on Cloudflare
+          projectName: yfitops1          # must match the project name you created on Cloudflare
           directory: dist                      # the folder to deploy
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
