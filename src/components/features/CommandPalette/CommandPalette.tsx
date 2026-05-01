@@ -1,44 +1,136 @@
 // src/components/features/CommandPalette/CommandPalette.tsx
-import React, { useEffect, useRef, useState } from 'react';
+// Phase 7: Full Command Palette — built with cmdk
+// Opened via Cmd+K / Ctrl+K; closed via Escape or backdrop click.
+
+import React, { useEffect, useCallback } from 'react';
+import { Command } from 'cmdk';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import {
-  Columns2,
-  Rows2,
-  Square,
-  TerminalSquare,
-  MessageSquare,
-  Maximize2,
-  FolderOpen,
-  RotateCcw,
-  Moon,
-  Sun,
-  Bot,
-  Trash2,
-  Zap,
-  BarChart3,
-  Settings,
-  GitBranch,
-} from 'lucide-react';
 import type { LayoutMode } from '@/types/dev.types';
+import type { ConversationMeta } from '@/types/agent.types';
 
-interface CommandItem {
-  id: string;
-  label: string;
-  description?: string;
-  shortcut?: string;
-  icon: React.ElementType;
-  group: string;
-  action: () => void;
+// ── Icon components (inline SVG — avoids any lucide mismatch) ─
+function Icon({ d, size = 15 }: { d: string; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <path d={d} />
+    </svg>
+  );
 }
 
+// ── Shortcut badge ─────────────────────────────────────────
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd
+      style={{
+        background: 'var(--bg-elevated)',
+        color: 'var(--text-muted)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '2px 8px',
+        fontSize: 11,
+        fontFamily: 'var(--font-mono)',
+        lineHeight: 1.6,
+        display: 'inline-flex',
+        alignItems: 'center',
+      }}
+    >
+      {children}
+    </kbd>
+  );
+}
+
+// ── Individual command row ─────────────────────────────────
+interface CmdRowProps {
+  icon: string;
+  label: string;
+  shortcut?: string;
+  onSelect: () => void;
+}
+
+function CmdRow({ icon, label, shortcut, onSelect }: CmdRowProps) {
+  return (
+    <Command.Item
+      onSelect={onSelect}
+      style={{ all: 'unset', display: 'block', width: '100%' }}
+    >
+      <div
+        className="cmd-item"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          padding: '10px 16px',
+          borderRadius: 8,
+          cursor: 'pointer',
+          borderLeft: '2px solid transparent',
+          transition: 'background 120ms ease, border-color 120ms ease',
+          fontFamily: 'var(--font-body)',
+          fontSize: 14,
+          color: 'var(--text-secondary)',
+        }}
+      >
+        <span style={{ fontSize: 16, flexShrink: 0, lineHeight: 1 }} aria-hidden="true">
+          {icon}
+        </span>
+        <span style={{ flex: 1 }}>{label}</span>
+        {shortcut && <Kbd>{shortcut}</Kbd>}
+      </div>
+    </Command.Item>
+  );
+}
+
+// ── Group heading ──────────────────────────────────────────
+function GroupHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        padding: '12px 16px 6px',
+        fontSize: 11,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        color: 'var(--text-muted)',
+        fontFamily: 'var(--font-body)',
+        fontWeight: 500,
+      }}
+      aria-hidden="true"
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── Separator line ─────────────────────────────────────────
+function Sep() {
+  return (
+    <div
+      style={{
+        height: 1,
+        background: 'var(--border-subtle)',
+        margin: '4px 0',
+      }}
+      role="separator"
+    />
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────
 export function CommandPalette() {
   const navigate = useNavigate();
-  const [query, setQuery] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [selectedIdx, setSelectedIdx] = useState(0);
 
   const {
+    commandPaletteOpen,
     closeCommandPalette,
     setLayoutMode,
     toggleTheme,
@@ -46,279 +138,429 @@ export function CommandPalette() {
     setExpertMode,
     expertMode,
     createTerminalSession,
+    addConversation,
+    setActiveConversation,
     clearChat,
     activeConversationId,
   } = useAppStore();
 
-  const commands: CommandItem[] = [
-    // Layout
-    {
-      id: 'layout-split-h',
-      label: 'Split Horizontal',
-      shortcut: 'Alt+H',
-      icon: Rows2,
-      group: 'Layout',
-      action: () => { setLayoutMode('split-horizontal' as LayoutMode); closeCommandPalette(); },
+  // ── Close on Escape (cmdk handles this, but belt-and-suspenders) ──
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) closeCommandPalette();
     },
-    {
-      id: 'layout-split-v',
-      label: 'Split Vertical',
-      shortcut: 'Alt+V',
-      icon: Columns2,
-      group: 'Layout',
-      action: () => { setLayoutMode('split-vertical' as LayoutMode); closeCommandPalette(); },
-    },
-    {
-      id: 'layout-editor',
-      label: 'Editor Only',
-      shortcut: 'Alt+E',
-      icon: Square,
-      group: 'Layout',
-      action: () => { setLayoutMode('editor-only' as LayoutMode); closeCommandPalette(); },
-    },
-    {
-      id: 'layout-terminal',
-      label: 'Terminal Only',
-      shortcut: 'Alt+T',
-      icon: TerminalSquare,
-      group: 'Layout',
-      action: () => { setLayoutMode('terminal-only' as LayoutMode); closeCommandPalette(); },
-    },
-    {
-      id: 'layout-chat',
-      label: 'Chat Only',
-      shortcut: 'Alt+C',
-      icon: MessageSquare,
-      group: 'Layout',
-      action: () => { setLayoutMode('chat-only' as LayoutMode); closeCommandPalette(); },
-    },
-    {
-      id: 'layout-full',
-      label: 'Full IDE View',
-      shortcut: 'Alt+F',
-      icon: Maximize2,
-      group: 'Layout',
-      action: () => { setLayoutMode('ide-full' as LayoutMode); closeCommandPalette(); },
-    },
-    // Navigation
-    {
-      id: 'nav-workspace',
-      label: 'Go to Workspace',
-      icon: FolderOpen,
-      group: 'Navigation',
-      action: () => { navigate('/workspace'); closeCommandPalette(); },
-    },
-    {
-      id: 'nav-dashboard',
-      label: 'Go to Dashboard',
-      icon: BarChart3,
-      group: 'Navigation',
-      action: () => { navigate('/dashboard'); closeCommandPalette(); },
-    },
-    {
-      id: 'nav-analytics',
-      label: 'Go to Analytics',
-      icon: BarChart3,
-      group: 'Navigation',
-      action: () => { navigate('/analytics'); closeCommandPalette(); },
-    },
-    {
-      id: 'nav-builds',
-      label: 'Go to Build Monitor',
-      icon: GitBranch,
-      group: 'Navigation',
-      action: () => { navigate('/builds'); closeCommandPalette(); },
-    },
-    {
-      id: 'nav-settings',
-      label: 'Go to Settings',
-      icon: Settings,
-      group: 'Navigation',
-      action: () => { navigate('/settings'); closeCommandPalette(); },
-    },
-    // Agent
-    {
-      id: 'agent-new',
-      label: 'New AI Conversation',
-      icon: Bot,
-      group: 'Agent',
-      action: () => { navigate('/workspace'); closeCommandPalette(); },
-    },
-    {
-      id: 'agent-clear',
-      label: 'Clear Current Chat',
-      icon: Trash2,
-      group: 'Agent',
-      action: () => {
-        if (activeConversationId) clearChat(activeConversationId);
-        closeCommandPalette();
-      },
-    },
-    // Terminal
-    {
-      id: 'terminal-new',
-      label: 'New Terminal Tab',
-      shortcut: 'Ctrl+`',
-      icon: TerminalSquare,
-      group: 'Terminal',
-      action: () => {
-        const id = `term-${Date.now()}`;
-        createTerminalSession(id);
-        navigate('/workspace');
-        closeCommandPalette();
-      },
-    },
-    // Appearance
-    {
-      id: 'appearance-theme',
-      label: theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-      shortcut: '⌘⇧L',
-      icon: theme === 'dark' ? Sun : Moon,
-      group: 'Appearance',
-      action: () => { toggleTheme(); closeCommandPalette(); },
-    },
-    {
-      id: 'appearance-expert',
-      label: expertMode ? 'Disable Expert Mode' : 'Enable Expert Mode',
-      icon: Zap,
-      group: 'Appearance',
-      action: () => { setExpertMode(!expertMode); closeCommandPalette(); },
-    },
-    // Reload
-    {
-      id: 'system-reload',
-      label: 'Reload Page',
-      icon: RotateCcw,
-      group: 'System',
-      action: () => { window.location.reload(); },
-    },
-  ];
+    [closeCommandPalette],
+  );
 
-  const filtered = query.trim()
-    ? commands.filter((c) =>
-        c.label.toLowerCase().includes(query.toLowerCase()) ||
-        c.group.toLowerCase().includes(query.toLowerCase()) ||
-        (c.description?.toLowerCase().includes(query.toLowerCase()))
-      )
-    : commands;
-
-  // Group commands
-  const grouped: Record<string, CommandItem[]> = {};
-  for (const cmd of filtered) {
-    if (!grouped[cmd.group]) grouped[cmd.group] = [];
-    grouped[cmd.group].push(cmd);
+  // ── Helper: run action + close ────────────────────────────
+  function run(fn: () => void) {
+    fn();
+    closeCommandPalette();
   }
 
-  const allFiltered = filtered;
-
-  useEffect(() => {
-    setSelectedIdx(0);
-  }, [query]);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIdx((i) => Math.min(i + 1, allFiltered.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      allFiltered[selectedIdx]?.action();
-    } else if (e.key === 'Escape') {
-      closeCommandPalette();
-    }
+  // ── Layout actions ─────────────────────────────────────────
+  function layout(mode: LayoutMode) {
+    return () => run(() => setLayoutMode(mode));
   }
 
-  let itemIdx = 0;
+  // ── New terminal tab ───────────────────────────────────────
+  function newTerminalTab() {
+    run(() => {
+      const id = crypto.randomUUID();
+      createTerminalSession(id, '/');
+      navigate('/workspace');
+    });
+  }
+
+  // ── New AI conversation ────────────────────────────────────
+  function newConversation() {
+    run(() => {
+      const id = crypto.randomUUID();
+      const conv: ConversationMeta = {
+        id,
+        title: 'New conversation',
+        category: 'general',
+        messageCount: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      addConversation(conv);
+      setActiveConversation(id);
+      navigate('/workspace');
+    });
+  }
+
+  // ── Clear current chat ─────────────────────────────────────
+  function clearCurrentChat() {
+    run(() => {
+      if (activeConversationId) clearChat(activeConversationId);
+    });
+  }
+
+  // Don't render at all when closed — keeps React tree clean
+  if (!commandPaletteOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 flex items-start justify-center pt-[15vh]"
-      style={{ background: 'rgba(6,6,9,0.7)', backdropFilter: 'blur(8px)', zIndex: 'var(--z-command)' }}
-      onClick={closeCommandPalette}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command Palette"
-    >
+    <>
+      {/* ── Global cmdk style overrides ── */}
+      <style>{`
+        /* Selected item highlight — cmdk sets aria-selected */
+        [cmdk-item][aria-selected="true"] .cmd-item {
+          background: rgba(0, 245, 160, 0.07);
+          border-left-color: var(--accent-400) !important;
+          color: var(--text-primary);
+        }
+        [cmdk-item][aria-selected="true"] .cmd-item span:first-child {
+          color: var(--accent-400);
+        }
+        /* Hover — non-selected items */
+        [cmdk-item]:not([aria-selected="true"]):hover .cmd-item {
+          background: rgba(255, 255, 255, 0.03);
+        }
+        /* Remove default cmdk focus ring */
+        [cmdk-item] {
+          outline: none;
+          cursor: pointer;
+        }
+        /* Input */
+        [cmdk-input] {
+          all: unset;
+          flex: 1;
+          font-size: 14px;
+          color: var(--text-primary);
+          font-family: var(--font-body);
+          caret-color: var(--accent-400);
+          background: transparent;
+        }
+        [cmdk-input]::placeholder {
+          color: var(--text-muted);
+        }
+        /* Empty state */
+        [cmdk-empty] {
+          padding: 48px 16px;
+          text-align: center;
+          font-size: 14px;
+          color: var(--text-muted);
+          font-family: var(--font-body);
+        }
+        /* List */
+        [cmdk-list] {
+          max-height: 380px;
+          overflow-y: auto;
+          padding: 8px;
+          scrollbar-width: thin;
+          scrollbar-color: var(--border-strong) transparent;
+        }
+        [cmdk-list]::-webkit-scrollbar {
+          width: 4px;
+        }
+        [cmdk-list]::-webkit-scrollbar-thumb {
+          background: var(--border-strong);
+          border-radius: 2px;
+        }
+        /* Remove the default cmdk group heading */
+        [cmdk-group-heading] {
+          display: none;
+        }
+      `}</style>
+
+      {/* ── Backdrop ─────────────────────────────────────────── */}
       <div
-        className="w-full max-w-xl glass rounded-xl overflow-hidden animate-fade-up"
-        style={{ boxShadow: 'var(--shadow-lg), var(--shadow-accent)', maxHeight: '60vh', display: 'flex', flexDirection: 'column' }}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-        role="combobox"
-        aria-expanded="true"
-        aria-haspopup="listbox"
+        className="fixed inset-0"
+        style={{
+          background: 'rgba(6,6,9,0.72)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: 50,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'center',
+          paddingTop: '15vh',
+        }}
+        onClick={closeCommandPalette}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command Palette"
       >
-        {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search commands, files, conversations…"
-            className="flex-1 bg-transparent outline-none text-sm"
-            style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)', caretColor: 'var(--accent-400)' }}
-            aria-label="Search commands"
-            role="searchbox"
-          />
-          <kbd className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--bg-overlay)', color: 'var(--text-muted)', border: '1px solid var(--border-default)', fontSize: 10 }}>
-            ESC
-          </kbd>
-        </div>
+        {/* ── Palette container ──────────────────────────────── */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%',
+            maxWidth: 600,
+            borderRadius: 'var(--radius-lg)',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-default)',
+            boxShadow: '0 16px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,245,160,0.04)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            maxHeight: 500,
+            animation: 'fade-up 200ms var(--ease-out-back) both',
+          }}
+        >
+          <Command
+            label="Command Palette"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                closeCommandPalette();
+              }
+            }}
+            loop
+            style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}
+          >
+            {/* ── Search input ───────────────────────────────── */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '14px 16px',
+                borderBottom: '1px solid var(--border-subtle)',
+              }}
+            >
+              {/* Search icon */}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                style={{ color: 'var(--text-muted)', flexShrink: 0 }}
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+              </svg>
 
-        {/* Results */}
-        <div className="overflow-y-auto flex-1" role="listbox" aria-label="Commands">
-          {Object.entries(grouped).map(([group, items]) => (
-            <div key={group}>
-              <div className="px-4 py-2 text-label-sm" style={{ color: 'var(--text-muted)' }}>{group}</div>
-              {items.map((cmd) => {
-                const currentIdx = itemIdx++;
-                const isSelected = currentIdx === selectedIdx;
-                const Icon = cmd.icon;
-                return (
-                  <button
-                    key={cmd.id}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-left"
-                    style={{
-                      background: isSelected ? 'rgba(0,245,160,0.08)' : 'transparent',
-                      color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      borderLeft: isSelected ? '2px solid var(--accent-400)' : '2px solid transparent',
-                      fontFamily: 'var(--font-body)',
-                    }}
-                    onClick={cmd.action}
-                    onMouseEnter={() => setSelectedIdx(currentIdx)}
-                    role="option"
-                    aria-selected={isSelected}
-                  >
-                    <Icon size={15} style={{ color: isSelected ? 'var(--accent-400)' : 'var(--text-muted)', flexShrink: 0 }} aria-hidden="true" />
-                    <span className="flex-1">{cmd.label}</span>
-                    {cmd.shortcut && (
-                      <kbd className="text-xs px-1.5 py-0.5 rounded ml-auto" style={{ background: 'var(--bg-overlay)', color: 'var(--text-muted)', border: '1px solid var(--border-default)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
-                        {cmd.shortcut}
-                      </kbd>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+              <Command.Input
+                autoFocus
+                placeholder="Search commands, files, conversations…"
+              />
 
-          {filtered.length === 0 && (
-            <div className="px-4 py-12 text-center">
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No commands found for "{query}"</p>
+              <Kbd>ESC</Kbd>
             </div>
-          )}
+
+            {/* ── Results list ───────────────────────────────── */}
+            <Command.List>
+              <Command.Empty>No commands found.</Command.Empty>
+
+              {/* ════ GROUP: Layout ════ */}
+              <Command.Group>
+                <GroupHeading>Layout</GroupHeading>
+
+                <CmdRow
+                  icon="⊞"
+                  label="Split Horizontal"
+                  shortcut="⌘\"
+                  onSelect={layout('split-horizontal')}
+                />
+                <CmdRow
+                  icon="⊟"
+                  label="Split Vertical"
+                  shortcut="⌘⇧\"
+                  onSelect={layout('split-vertical')}
+                />
+                <CmdRow
+                  icon="□"
+                  label="Editor Only"
+                  shortcut="⌘E"
+                  onSelect={layout('editor-only')}
+                />
+                <CmdRow
+                  icon="─"
+                  label="Terminal Only"
+                  shortcut="⌘T"
+                  onSelect={layout('terminal-only')}
+                />
+                <CmdRow
+                  icon="💬"
+                  label="Chat Only"
+                  shortcut="⌘C"
+                  onSelect={layout('chat-only')}
+                />
+                <CmdRow
+                  icon="⊡"
+                  label="Full IDE View"
+                  shortcut="⌘F"
+                  onSelect={layout('ide-full')}
+                />
+              </Command.Group>
+
+              <Sep />
+
+              {/* ════ GROUP: Navigation ════ */}
+              <Command.Group>
+                <GroupHeading>Navigation</GroupHeading>
+
+                <CmdRow
+                  icon="📂"
+                  label="Go to File…"
+                  shortcut="⌘P"
+                  onSelect={() => run(() => {})}
+                />
+                <CmdRow
+                  icon="📌"
+                  label="Go to Line…"
+                  shortcut="⌃G"
+                  onSelect={() => run(() => {})}
+                />
+                <CmdRow
+                  icon="🔍"
+                  label="Search in Files…"
+                  shortcut="⌘⇧F"
+                  onSelect={() => run(() => {})}
+                />
+                <CmdRow
+                  icon="🏠"
+                  label="Go to Dashboard"
+                  onSelect={() => run(() => navigate('/dashboard'))}
+                />
+                <CmdRow
+                  icon="📊"
+                  label="Go to Analytics"
+                  onSelect={() => run(() => navigate('/analytics'))}
+                />
+                <CmdRow
+                  icon="🔨"
+                  label="Go to Build Monitor"
+                  onSelect={() => run(() => navigate('/builds'))}
+                />
+                <CmdRow
+                  icon="⚙️"
+                  label="Go to Settings"
+                  onSelect={() => run(() => navigate('/settings'))}
+                />
+                <CmdRow
+                  icon="💳"
+                  label="Go to Billing"
+                  onSelect={() => run(() => navigate('/billing'))}
+                />
+              </Command.Group>
+
+              <Sep />
+
+              {/* ════ GROUP: Agent ════ */}
+              <Command.Group>
+                <GroupHeading>Agent</GroupHeading>
+
+                <CmdRow
+                  icon="🤖"
+                  label="New AI Conversation"
+                  onSelect={newConversation}
+                />
+                <CmdRow
+                  icon="🗑"
+                  label="Clear Current Chat"
+                  onSelect={clearCurrentChat}
+                />
+              </Command.Group>
+
+              <Sep />
+
+              {/* ════ GROUP: Terminal ════ */}
+              <Command.Group>
+                <GroupHeading>Terminal</GroupHeading>
+
+                <CmdRow
+                  icon="➕"
+                  label="New Terminal Tab"
+                  shortcut="⌃`"
+                  onSelect={newTerminalTab}
+                />
+                <CmdRow
+                  icon="🗑"
+                  label="Clear Terminal"
+                  shortcut="⌃L"
+                  onSelect={() => run(() => {})}
+                />
+              </Command.Group>
+
+              <Sep />
+
+              {/* ════ GROUP: Appearance ════ */}
+              <Command.Group>
+                <GroupHeading>Appearance</GroupHeading>
+
+                <CmdRow
+                  icon="🌙"
+                  label={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  shortcut="⌘⇧L"
+                  onSelect={() => run(toggleTheme)}
+                />
+                <CmdRow
+                  icon="🔬"
+                  label={expertMode ? 'Disable Expert Mode' : 'Enable Expert Mode'}
+                  onSelect={() => run(() => setExpertMode(!expertMode))}
+                />
+              </Command.Group>
+
+              <Sep />
+
+              {/* ════ GROUP: System ════ */}
+              <Command.Group>
+                <GroupHeading>System</GroupHeading>
+
+                <CmdRow
+                  icon="🔄"
+                  label="Reload Page"
+                  onSelect={() => window.location.reload()}
+                />
+              </Command.Group>
+            </Command.List>
+
+            {/* ── Footer hint bar ────────────────────────────── */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                padding: '8px 16px',
+                borderTop: '1px solid var(--border-subtle)',
+              }}
+            >
+              <span
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                <Kbd>↑↓</Kbd> navigate
+              </span>
+              <span
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                <Kbd>↵</Kbd> select
+              </span>
+              <span
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                <Kbd>ESC</Kbd> close
+              </span>
+            </div>
+          </Command>
         </div>
       </div>
-    </div>
+    </>
   );
 }
