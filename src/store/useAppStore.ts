@@ -1,9 +1,8 @@
 // src/store/useAppStore.ts
-// Single Zustand store — fully typed, persisted, immer-backed
+// Single Zustand store — fully typed, persisted, plain set (no immer dependency)
 
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
-import { immer } from 'zustand/middleware/immer';
 import type {
   FileNode,
   EditorTab,
@@ -156,7 +155,7 @@ export interface AppState {
 export const useAppStore = create<AppState>()(
   subscribeWithSelector(
     persist(
-      immer((set) => ({
+      (set, get) => ({
         // ── Initial State ──
         user: null,
         isAuthLoading: true,
@@ -208,175 +207,221 @@ export const useAppStore = create<AppState>()(
         unreadNotificationCount: 0,
 
         // ── Auth ──
-        setUser: (user) => set((s) => { s.user = user; }),
-        setAuthLoading: (v) => set((s) => { s.isAuthLoading = v; }),
+        setUser: (user) => set({ user }),
+        setAuthLoading: (v) => set({ isAuthLoading: v }),
 
         // ── Layout ──
-        setLayoutMode: (mode) => set((s) => { s.layoutMode = mode; }),
-        setSplitRatio: (ratio) => set((s) => { s.splitRatio = Math.min(0.8, Math.max(0.2, ratio)); }),
+        setLayoutMode: (mode) => set({ layoutMode: mode }),
+        setSplitRatio: (ratio) => set({ splitRatio: Math.min(0.8, Math.max(0.2, ratio)) }),
         togglePanel: (panel) => set((s) => {
-          const idx = s.activePanelIds.indexOf(panel);
-          if (idx >= 0) s.activePanelIds.splice(idx, 1);
-          else s.activePanelIds.push(panel);
+          const ids = s.activePanelIds;
+          return {
+            activePanelIds: ids.includes(panel)
+              ? ids.filter((p) => p !== panel)
+              : [...ids, panel],
+          };
         }),
-        setSidebarCollapsed: (v) => set((s) => { s.sidebarCollapsed = v; }),
-        setSidebarWidth: (w) => set((s) => { s.sidebarWidth = Math.min(400, Math.max(200, w)); }),
-        setRightPanelWidth: (w) => set((s) => { s.rightPanelWidth = Math.min(600, Math.max(280, w)); }),
-        toggleTheme: () => set((s) => { s.theme = s.theme === 'dark' ? 'light' : 'dark'; }),
-        setExpertMode: (v) => set((s) => { s.expertMode = v; }),
-        openCommandPalette: () => set((s) => { s.commandPaletteOpen = true; }),
-        closeCommandPalette: () => set((s) => { s.commandPaletteOpen = false; }),
-        setFocusedPanel: (panel) => set((s) => { s.focusedPanel = panel; }),
+        setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+        setSidebarWidth: (w) => set({ sidebarWidth: Math.min(400, Math.max(200, w)) }),
+        setRightPanelWidth: (w) => set({ rightPanelWidth: Math.min(600, Math.max(280, w)) }),
+        toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+        setExpertMode: (v) => set({ expertMode: v }),
+        openCommandPalette: () => set({ commandPaletteOpen: true }),
+        closeCommandPalette: () => set({ commandPaletteOpen: false }),
+        setFocusedPanel: (panel) => set({ focusedPanel: panel }),
 
         // ── File System ──
-        setWorkspaceReady: (ready, error) => set((s) => {
-          s.workspaceReady = ready;
-          s.workspaceError = error ?? null;
-        }),
-        setFileTree: (tree) => set((s) => { s.fileTree = tree; }),
+        setWorkspaceReady: (ready, error) => set({ workspaceReady: ready, workspaceError: error ?? null }),
+        setFileTree: (tree) => set({ fileTree: tree }),
         openFile: (path, language) => set((s) => {
           const existing = s.openTabs.find((t) => t.path === path);
-          if (existing) {
-            s.activeTabId = existing.id;
-            return;
-          }
+          if (existing) return { activeTabId: existing.id, selectedFilePath: path };
           const id = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           const name = path.split('/').pop() ?? path;
-          s.openTabs.push({ id, path, name, isDirty: false, language });
-          s.activeTabId = id;
-          s.selectedFilePath = path;
+          return {
+            openTabs: [...s.openTabs, { id, path, name, isDirty: false, language }],
+            activeTabId: id,
+            selectedFilePath: path,
+          };
         }),
         closeTab: (tabId) => set((s) => {
           const idx = s.openTabs.findIndex((t) => t.id === tabId);
-          if (idx < 0) return;
-          s.openTabs.splice(idx, 1);
-          if (s.activeTabId === tabId) {
-            s.activeTabId = s.openTabs[Math.max(0, idx - 1)]?.id ?? null;
-          }
+          if (idx < 0) return {};
+          const newTabs = s.openTabs.filter((t) => t.id !== tabId);
+          const newActiveId = s.activeTabId === tabId
+            ? (newTabs[Math.max(0, idx - 1)]?.id ?? null)
+            : s.activeTabId;
+          return { openTabs: newTabs, activeTabId: newActiveId };
         }),
-        setActiveTab: (tabId) => set((s) => { s.activeTabId = tabId; }),
+        setActiveTab: (tabId) => set({ activeTabId: tabId }),
         markTabDirty: (tabId, dirty) => set((s) => {
           const tab = s.openTabs.find((t) => t.id === tabId);
-          if (tab) {
-            tab.isDirty = dirty;
-            if (dirty && !s.dirtyFiles.includes(tab.path)) {
-              s.dirtyFiles.push(tab.path);
-            } else if (!dirty) {
-              s.dirtyFiles = s.dirtyFiles.filter((p) => p !== tab.path);
-            }
-          }
+          if (!tab) return {};
+          return {
+            openTabs: s.openTabs.map((t) =>
+              t.id === tabId ? { ...t, isDirty: dirty } : t
+            ),
+            dirtyFiles: dirty
+              ? s.dirtyFiles.includes(tab.path) ? s.dirtyFiles : [...s.dirtyFiles, tab.path]
+              : s.dirtyFiles.filter((p) => p !== tab.path),
+          };
         }),
-        setCursorPosition: (tabId, line, col) => set((s) => {
-          const tab = s.openTabs.find((t) => t.id === tabId);
-          if (tab) { tab.cursorLine = line; tab.cursorCol = col; }
-        }),
-        toggleFolder: (path) => set((s) => {
-          const idx = s.expandedFolders.indexOf(path);
-          if (idx >= 0) s.expandedFolders.splice(idx, 1);
-          else s.expandedFolders.push(path);
-        }),
-        setSelectedFile: (path) => set((s) => { s.selectedFilePath = path; }),
-        setCurrentBranch: (branch) => set((s) => { s.currentBranch = branch; }),
-        setEditorMarkers: (errors, warnings) => set((s) => {
-          s.editorErrors = errors;
-          s.editorWarnings = warnings;
-        }),
+        setCursorPosition: (tabId, line, col) => set((s) => ({
+          openTabs: s.openTabs.map((t) =>
+            t.id === tabId ? { ...t, cursorLine: line, cursorCol: col } : t
+          ),
+        })),
+        toggleFolder: (path) => set((s) => ({
+          expandedFolders: s.expandedFolders.includes(path)
+            ? s.expandedFolders.filter((p) => p !== path)
+            : [...s.expandedFolders, path],
+        })),
+        setSelectedFile: (path) => set({ selectedFilePath: path }),
+        setCurrentBranch: (branch) => set({ currentBranch: branch }),
+        setEditorMarkers: (errors, warnings) => set({ editorErrors: errors, editorWarnings: warnings }),
         removeFileFromTree: (path) => set((s) => {
           function removeFromTree(nodes: FileNode[]): FileNode[] {
             return nodes
               .filter((n) => n.path !== path)
               .map((n) => ({ ...n, children: n.children ? removeFromTree(n.children) : undefined }));
           }
-          s.fileTree = removeFromTree(s.fileTree);
+          return { fileTree: removeFromTree(s.fileTree) };
         }),
-        addFileToTree: (file) => set((s) => { s.fileTree.push(file); }),
+        addFileToTree: (file) => set((s) => ({ fileTree: [...s.fileTree, file] })),
 
         // ── Terminal ──
-        createTerminalSession: (id, cwd = '/') => set((s) => {
-          s.terminalSessions[id] = {
-            id,
-            title: `bash`,
-            isRunning: false,
-            output: [],
-            cwd,
-            createdAt: Date.now(),
-          };
-          s.activeTerminalId = id;
-        }),
+        createTerminalSession: (id, cwd = '/') => set((s) => ({
+          terminalSessions: {
+            ...s.terminalSessions,
+            [id]: {
+              id,
+              title: 'bash',
+              isRunning: false,
+              output: [],
+              cwd,
+              createdAt: Date.now(),
+            },
+          },
+          activeTerminalId: id,
+        })),
         removeTerminalSession: (id) => set((s) => {
-          delete s.terminalSessions[id];
-          if (s.activeTerminalId === id) {
-            const remaining = Object.keys(s.terminalSessions);
-            s.activeTerminalId = remaining[0] ?? null;
-          }
+          const { [id]: _removed, ...rest } = s.terminalSessions;
+          const remaining = Object.keys(rest);
+          return {
+            terminalSessions: rest,
+            activeTerminalId: s.activeTerminalId === id ? (remaining[0] ?? null) : s.activeTerminalId,
+          };
         }),
-        setActiveTerminal: (id) => set((s) => { s.activeTerminalId = id; }),
+        setActiveTerminal: (id) => set({ activeTerminalId: id }),
         appendTerminalOutput: (sessionId, line) => set((s) => {
           const session = s.terminalSessions[sessionId];
-          if (session) {
-            session.output.push(line);
-            if (session.output.length > 5000) session.output.splice(0, 500);
-          }
+          if (!session) return {};
+          const output = [...session.output, line];
+          const trimmed = output.length > 5000 ? output.slice(-4500) : output;
+          return {
+            terminalSessions: {
+              ...s.terminalSessions,
+              [sessionId]: { ...session, output: trimmed },
+            },
+          };
         }),
         setTerminalRunning: (sessionId, running) => set((s) => {
           const session = s.terminalSessions[sessionId];
-          if (session) session.isRunning = running;
+          if (!session) return {};
+          return {
+            terminalSessions: {
+              ...s.terminalSessions,
+              [sessionId]: { ...session, isRunning: running },
+            },
+          };
         }),
         setTerminalExitCode: (sessionId, code) => set((s) => {
           const session = s.terminalSessions[sessionId];
-          if (session) { session.exitCode = code; session.isRunning = false; }
+          if (!session) return {};
+          return {
+            terminalSessions: {
+              ...s.terminalSessions,
+              [sessionId]: { ...session, exitCode: code, isRunning: false },
+            },
+          };
         }),
 
         // ── Processes ──
-        registerProcess: (p) => set((s) => { s.processes[p.id] = p; }),
+        registerProcess: (p) => set((s) => ({
+          processes: { ...s.processes, [p.id]: p },
+        })),
         updateProcessStatus: (id, status, exitCode) => set((s) => {
           const p = s.processes[id];
-          if (p) {
-            p.status = status;
-            if (exitCode !== undefined) p.exitCode = exitCode;
-            if (['exited', 'killed', 'errored'].includes(status)) p.endedAt = Date.now();
-          }
+          if (!p) return {};
+          return {
+            processes: {
+              ...s.processes,
+              [id]: {
+                ...p,
+                status,
+                ...(exitCode !== undefined ? { exitCode } : {}),
+                ...(['exited', 'killed', 'errored'].includes(status) ? { endedAt: Date.now() } : {}),
+              },
+            },
+          };
         }),
         appendProcessOutput: (id, line) => set((s) => {
           const p = s.processes[id];
-          if (p) {
-            p.output.push(line);
-            if (p.output.length > 2000) p.output.splice(0, 200);
-          }
+          if (!p) return {};
+          const output = [...p.output, line];
+          const trimmed = output.length > 2000 ? output.slice(-1800) : output;
+          return { processes: { ...s.processes, [id]: { ...p, output: trimmed } } };
         }),
 
         // ── Agent ──
-        setConversations: (convs) => set((s) => { s.conversations = convs; }),
-        setActiveConversation: (id) => set((s) => { s.activeConversationId = id; }),
-        addConversation: (conv) => set((s) => { s.conversations.unshift(conv); }),
+        setConversations: (convs) => set({ conversations: convs }),
+        setActiveConversation: (id) => set({ activeConversationId: id }),
+        addConversation: (conv) => set((s) => ({ conversations: [conv, ...s.conversations] })),
         addMessage: (convId, msg) => set((s) => {
-          if (!s.messages[convId]) s.messages[convId] = [];
-          s.messages[convId].push(msg);
-          const conv = s.conversations.find((c) => c.id === convId);
-          if (conv) { conv.messageCount++; conv.updatedAt = Date.now(); }
+          const existing = s.messages[convId] ?? [];
+          const updatedConversations = s.conversations.map((c) =>
+            c.id === convId ? { ...c, messageCount: c.messageCount + 1, updatedAt: Date.now() } : c
+          );
+          return {
+            messages: { ...s.messages, [convId]: [...existing, msg] },
+            conversations: updatedConversations,
+          };
         }),
         updateMessage: (convId, msgId, patch) => set((s) => {
           const msgs = s.messages[convId];
-          if (!msgs) return;
-          const msg = msgs.find((m) => m.id === msgId);
-          if (msg) Object.assign(msg, patch);
+          if (!msgs) return {};
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: msgs.map((m) => (m.id === msgId ? { ...m, ...patch } : m)),
+            },
+          };
         }),
-        setIsThinking: (v) => set((s) => { s.isThinking = v; }),
-        setStreamingMessageId: (id) => set((s) => { s.streamingMessageId = id; }),
-        setPendingActions: (actions) => set((s) => { s.pendingActions = actions; }),
+        setIsThinking: (v) => set({ isThinking: v }),
+        setStreamingMessageId: (id) => set({ streamingMessageId: id }),
+        setPendingActions: (actions) => set({ pendingActions: actions }),
         updateActionStatus: (msgId, actionIdx, status, result) => set((s) => {
           for (const convId of Object.keys(s.messages)) {
-            const msg = s.messages[convId]?.find((m) => m.id === msgId);
-            if (msg?.actions?.[actionIdx]) {
-              msg.actions[actionIdx].status = status;
-              if (result) msg.actions[actionIdx].result = result;
-              return;
+            const msgs = s.messages[convId];
+            const msgIdx = msgs?.findIndex((m) => m.id === msgId) ?? -1;
+            if (msgIdx >= 0 && msgs) {
+              const msg = msgs[msgIdx];
+              if (!msg.actions?.[actionIdx]) continue;
+              const newActions = [...(msg.actions ?? [])];
+              newActions[actionIdx] = { ...newActions[actionIdx], status, ...(result ? { result } : {}) };
+              return {
+                messages: {
+                  ...s.messages,
+                  [convId]: msgs.map((m, i) => (i === msgIdx ? { ...m, actions: newActions } : m)),
+                },
+              };
             }
           }
+          return {};
         }),
-        setAgentAutonomy: (level) => set((s) => { s.agentAutonomy = level; }),
-        updateAgentContext: (patch) => set((s) => { Object.assign(s.agentContext, patch); }),
-        clearChat: (convId) => set((s) => { s.messages[convId] = []; }),
+        setAgentAutonomy: (level) => set({ agentAutonomy: level }),
+        updateAgentContext: (patch) => set((s) => ({ agentContext: { ...s.agentContext, ...patch } })),
+        clearChat: (convId) => set((s) => ({ messages: { ...s.messages, [convId]: [] } })),
 
         // ── Notifications ──
         addNotification: (n) => set((s) => {
@@ -386,19 +431,19 @@ export const useAppStore = create<AppState>()(
             timestamp: Date.now(),
             read: false,
           };
-          s.notifications.unshift(notification);
-          s.unreadNotificationCount++;
-          if (s.notifications.length > 50) s.notifications.splice(50);
+          const notifications = [notification, ...s.notifications].slice(0, 50);
+          return { notifications, unreadNotificationCount: s.unreadNotificationCount + 1 };
         }),
         markNotificationRead: (id) => set((s) => {
           const n = s.notifications.find((x) => x.id === id);
-          if (n && !n.read) { n.read = true; s.unreadNotificationCount = Math.max(0, s.unreadNotificationCount - 1); }
+          if (!n || n.read) return {};
+          return {
+            notifications: s.notifications.map((x) => (x.id === id ? { ...x, read: true } : x)),
+            unreadNotificationCount: Math.max(0, s.unreadNotificationCount - 1),
+          };
         }),
-        clearNotifications: () => set((s) => {
-          s.notifications = [];
-          s.unreadNotificationCount = 0;
-        }),
-      })),
+        clearNotifications: () => set({ notifications: [], unreadNotificationCount: 0 }),
+      }),
       {
         name: 'yfitops-store',
         partialize: (state): Partial<AppState> => ({
