@@ -9,6 +9,9 @@ import { isWebContainerReady } from '@/core/webcontainer/webcontainer';
 import { isDangerousCommand } from '@/core/webcontainer/process';
 import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+
 
 // ── xterm types (minimal, for TS without the package installed) ──────────────
 interface ITerminal {
