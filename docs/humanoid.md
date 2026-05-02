@@ -2,7 +2,7 @@
 # The Complete Technical & Design Reference
 
 > **Living document** — updated every phase.  
-> Last updated: **Phase 10** (xterm real terminal, Monaco model disposal, Agent executor UI, Dashboard RPC stats, PromptBar file attach, settings autonomy, notification persistence)
+> Last updated: **Phase 11-13** (agent auto-execute, xterm history, Settings Supabase persistence, GitHub REST API integration, Analytics real RPC data, Stripe billing, create-checkout + stripe-webhook edge functions)
 
 ---
 
@@ -308,6 +308,30 @@ Single Zustand store with `subscribeWithSelector` + `persist` middleware. No imm
 ---
 
 ## 6. Core Features
+
+### 6.0 GitHub Integration (`src/lib/github.ts`)
+
+**No external dependencies** — uses raw `fetch` with GitHub REST API v3.
+
+| Function | Endpoint | Purpose |
+|---|---|---|
+| `getGitHubToken()` | Supabase profiles | Reads stored PAT |
+| `saveGitHubToken(token)` | `/user` + profiles | Validates + persists token + username |
+| `listUserRepos(token?)` | `/user/repos` | Lists up to 100 repos sorted by updated |
+| `connectReposToSupabase(repos)` | `connected_repos` upsert | Saves selected repos |
+| `createPullRequest(...)` | `/repos/:owner/:repo/pulls` | Opens a PR |
+
+**Settings flow:** Paste PAT → validate against `/user` → save to `profiles.github_access_token` + `github_username` → list repos with checkboxes → upsert selected to `connected_repos`.
+
+### 6.01 Stripe Billing
+
+**Edge Functions:**
+- `supabase/functions/create-checkout/index.ts` — Creates/reuses Stripe customer, creates Checkout Session (subscription mode), returns `{ url }`
+- `supabase/functions/stripe-webhook/index.ts` — Verifies Stripe signature (native HMAC-SHA256), handles `checkout.session.completed` + `customer.subscription.deleted`
+
+**Required secrets:** `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+
+**Plan tiers:** Starter (free / 500 AI req), Pro ($49/mo / 5000 req), Team ($199/mo / unlimited)
 
 ### 6.1 AI Agent
 **Flow:**
@@ -615,21 +639,21 @@ manualChunks: {
 | 8 | Supabase Realtime: Dashboard activity feed, Build Monitor live updates |
 | 9 | WebContainer ENOENT fix, agentExecutor wired to UI, 401 auth fix |
 | 10 | Real xterm.js terminal, Monaco model disposal, Dashboard RPC stats, PromptBar file attach, notification persistence |
+| 11-13 | Agent auto-execute (full-auto/auto-safe), xterm command history, Settings → Supabase, GitHub REST API, Analytics real RPC, Stripe checkout + webhook |
 
 ---
 
 ## 17. Known Gaps & Pending Phases
 
-See `docs/review.md` for full gap analysis. Key pending items:
+See `docs/review.md` for full gap analysis. Key remaining items:
 
-| Item | Phase | Priority |
+| Item | Priority | Notes |
 |---|---|---|
-| Agent executor → auto-execute based on autonomy | 11 | 🔴 High |
-| GitHub / Octokit repo connect + PR creation | 13 | 🔴 High |
-| Analytics page (Recharts from Supabase) | 12 | 🟡 Medium |
-| Billing / Stripe integration | 14 | 🟡 Medium |
-| Settings → persist to Supabase profiles | 15 | 🟡 Medium |
-| Monaco tab history command palette | — | 🟢 Low |
+| Analytics: Top changed files tracking | 🟡 Medium | Requires agent FS action events to be logged |
+| diff npm package for `edit_file` | 🟡 Medium | Custom parser works but edge cases exist |
+| Stripe Customer Portal | 🟢 Low | Add manage subscription link when customer_id exists |
+| Monaco command history in palette | 🟢 Low | Recently opened files shortcut |
+| OTP cooldown real 429 test | 🟢 Low | Verify against real Supabase rate limits |
 
 ---
 

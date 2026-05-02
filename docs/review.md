@@ -17,6 +17,7 @@
 | Phase 8: Supabase Realtime (Dashboard + Build Monitor) | ✅ Complete | useRealtimeEvents, useRealtimeBuilds, live feeds |
 | Phase 9: WebContainer Fix + Agent Executor + 401 Fix | ✅ Complete | ENOENT fix, agentExecutor wired, PromptBar Enter key, 401 auth fix |
 | Phase 10: Real xterm Terminal + Memory + Stats + File Attach | ✅ Complete | Real xterm.js (esm.sh), Monaco model disposal, Dashboard RPC stats, PromptBar file attach, notification persistence |
+| Phase 11-13: Agent Autonomy, GitHub, Analytics, Stripe, Settings Persist | ✅ Complete | Auto-execute logic, GitHub REST API, real Analytics RPC charts, Stripe checkout, Settings saved to Supabase, xterm history |
 
 ---
 
@@ -41,10 +42,8 @@
 
 ## 🔴 Known Broken / Incomplete
 
-### 1. Agent Executor — Auto-Execute Based on Autonomy (Full-Auto Mode)
-**File:** `src/hooks/useAIAgent.ts`, `src/components/features/AgentChat/AgentMessage.tsx`  
-**Current state:** When `agentAutonomy === 'full-auto'`, the agent still requires user to click Execute on each ActionCard. The `executeActions()` loop with `requestConfirmation` callback runs correctly for manual approval, but the autonomous path (skip confirmation when full-auto) is not triggered automatically after a message arrives.  
-**Fix required:** In `useAIAgent.sendMessage()` or in `AgentMessage.tsx`, after the response arrives and actions are stored: if `agentAutonomy === 'full-auto'` or `agentAutonomy === 'auto-safe'`, automatically call `handleApprove()` for each non-destructive action without waiting for user click.
+### 1. Agent Executor — Auto-Execute Based on Autonomy ✅ FIXED (Phase 11-13)
+**Resolution:** `useEffect` in `useAIAgent.ts` watches messages for new pending actions. `full-auto` executes all; `auto-safe` skips `requiresConfirmation: true`; `ask` leaves as-is. `autoExecutedRef` prevents double-runs.
 
 ### 2. Agent Executor — `edit_file` Diff Parser Edge Cases
 **File:** `src/core/agent/agentExecutor.ts`  
@@ -65,30 +64,20 @@
 **File:** `src/pages/BuildMonitor.tsx`  
 **Current state:** "View Logs" opens the drawer. If `log_url` is null (no CI configured), the drawer shows "No log URL available" with explanation. ✅ This is correctly handled. The external link button is conditionally rendered only when `log_url` exists.
 
-### 5. GitHub Integration — Octokit Not Wired
-**Files:** None (feature not started)  
-**Current state:** `profiles.github_access_token` column exists in Supabase. `connected_repos` table ready. But no Octokit-based repo listing, PR creation, or webhook integration exists.  
-**Fix:** `src/lib/github.ts` with `new Octokit({ auth: profile.github_access_token })` → list repos, create PR, list branches. Wire to "Connect Repo" flow in Dashboard.
+### 5. GitHub Integration ✅ FIXED (Phase 11-13)
+**Resolution:** `src/lib/github.ts` implemented with raw fetch (no Octokit needed). Functions: `getGitHubToken()`, `saveGitHubToken()`, `listUserRepos()`, `connectReposToSupabase()`, `createPullRequest()`. Settings GitHub tab: paste PAT → validate → list repos → select & upsert to `connected_repos`.
 
-### 6. Billing / Stripe — Not Implemented
-**File:** `src/pages/Billing.tsx`  
-**Current state:** Placeholder page.  
-**Fix:** Stripe Edge Function for checkout session. `subscribers` table. Subscription status on `profiles.plan`.
+### 6. Billing / Stripe ✅ IMPLEMENTED (Phase 11-13)
+**Resolution:** `supabase/functions/create-checkout/index.ts` creates Stripe Checkout Sessions. `supabase/functions/stripe-webhook/index.ts` handles `checkout.session.completed` and `customer.subscription.deleted`. Real usage bars from `profiles.ai_requests_used/limit`. Requires `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` in Supabase secrets.
 
-### 7. Analytics Page — Placeholder
-**File:** `src/pages/Analytics.tsx`  
-**Current state:** No real data. Placeholder layout.  
-**Fix (Phase 12):** Recharts LineChart (build success rate), BarChart (AI usage), RadialChart (language distribution) via react-query from Supabase.
+### 7. Analytics Page ✅ IMPLEMENTED (Phase 11-13)
+**Resolution:** Real Supabase RPC calls: `get_build_success_rate(12)` → Area Chart, `get_ai_usage(30)` → Bar Chart, events table grouped by `event_type` → Donut chart. Skeleton loaders, empty states with explanatory messages. Top changed files still placeholder (no file change event tracking yet).
 
-### 8. Settings Page — No Supabase Persistence
-**File:** `src/pages/Settings.tsx`  
-**Current state:** Settings UI (profile, AI agent, editor) changes do NOT persist to Supabase. They only update local state.  
-**Fix:** Wire "Save Changes" button to `supabase.from('profiles').update({...}).eq('id', user.id)` with optimistic update and toast feedback.
+### 8. Settings Page ✅ FIXED (Phase 11-13)
+**Resolution:** Profile save → `profiles.full_name + role`. Agent save → `profiles.expert_mode + agent_autonomy`. GitHub tab fully implemented. Uses `useMutation` + `useQuery` from react-query. Spinner during save, error toast on failure.
 
-### 9. xterm Terminal — No Command History (Arrow Keys)
-**File:** `src/components/features/Terminal/TerminalPanel.tsx`  
-**Current state:** The xterm `onData` handler does not implement arrow-key history navigation. Up/Down arrows are silently ignored in line-buffer mode.  
-**Fix:** Maintain a `string[]` history array per session. On `\x1b[A` (up) and `\x1b[B` (down), navigate history and overwrite current line buffer using ANSI escape sequences (`\x1b[2K\r` to clear line, then rewrite).
+### 9. xterm Terminal — Command History ✅ FIXED (Phase 11-13)
+**Resolution:** Per-session `history: string[]` + `historyIdx: number` in `XtermSession` object. Up arrow = older, Down arrow = newer, past end = clear. `\x1b[2K\r` clears line before writing history entry. Cap at 100. Only adds if different from last entry.
 
 ### 10. OTP Cooldown — Not Tested Against Real 429
 **File:** `src/hooks/useOtpCooldown.ts`  

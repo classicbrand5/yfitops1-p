@@ -9,9 +9,6 @@ import { isWebContainerReady } from '@/core/webcontainer/webcontainer';
 import { isDangerousCommand } from '@/core/webcontainer/process';
 import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-
 
 // ── xterm types (minimal, for TS without the package installed) ──────────────
 interface ITerminal {
@@ -19,7 +16,6 @@ interface ITerminal {
   write(data: string): void;
   writeln(data: string): void;
   onData(callback: (data: string) => void): void;
-  onKey(callback: (e: { key: string; domEvent: KeyboardEvent }) => void): void;
   dispose(): void;
   clear(): void;
   focus(): void;
@@ -52,6 +48,7 @@ async function loadXterm(): Promise<{ TerminalCtor: TerminalLib['Terminal']; Fit
   if (!_loading) {
     _loading = (async () => {
       // Load from esm.sh — works without package.json changes
+      // esm.sh serves with proper CORS headers for crossOriginIsolated environments
       const [xt, fa] = await Promise.all([
         import(/* @vite-ignore */ 'https://esm.sh/@xterm/xterm@5.3.0'),
         import(/* @vite-ignore */ 'https://esm.sh/@xterm/addon-fit@0.8.0'),
@@ -73,12 +70,15 @@ async function loadXterm(): Promise<{ TerminalCtor: TerminalLib['Terminal']; Fit
   return { TerminalCtor: _xtermLib!.Terminal, FitAddonCtor: _fitLib!.FitAddon };
 }
 
-// ── Per-session xterm state ───────────────────────────────────────────────────
+// ── Per-session state ────────────────────────────────────────────────────────
 interface XtermSession {
   terminal: ITerminal;
   fitAddon: IFitAddon;
   stdin?: WritableStreamDefaultWriter<string>;
   killProcess?: () => void;
+  history: string[];         // command history (newest last)
+  historyIdx: number;        // -1 = not navigating
+  lineBuffer: string;        // current typed line
 }
 
 const xtermSessions = new Map<string, XtermSession>();
@@ -132,12 +132,9 @@ function TerminalTab({ isActive, title, isRunning, onActivate, onClose }: Termin
 export function TerminalPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const [inputValue, setInputValue] = useState(''); // This state is not directly used for xterm input, but for the warning overlay
+  const [dangerWarning, setDangerWarning] = useState('');
   const [xtermReady, setXtermReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // The original code had `activeInputValueRef` but it was not used. Removing it to prevent lint warnings
-  // const activeInputValueRef = useRef('');
 
   const {
     terminalSessions,
@@ -149,15 +146,69 @@ export function TerminalPanel() {
     agentAutonomy,
   } = useAppStore();
 
-  const activeSession = activeTerminalId ? terminalSessions[activeTerminalId] : null;
-
   // ── Create initial session ─────────────────────────────────────────────────
   useEffect(() => {
     if (Object.keys(terminalSessions).length === 0) {
       const id = `term-${Date.now()}`;
       createTerminalSession(id, '/');
     }
-  }, [createTerminalSession, terminalSessions]); // Add dependencies for useEffect
+  }, [createTerminalSession, terminalSessions]); // Added terminalSessions to deps
+
+  // ── Run a command via WebContainer ────────────────────────────────────────
+  const runXtermCommand = useCallback(
+    async (cmd: string, sess: XtermSession, term: ITerminal, sessionId: string) => {
+      if (!cmd) return;
+
+      if (!isWebContainerReady()) {
+        term.writeln('\x1b[33m⚠ WebContainer not initialized — boot the workspace first.\x1b[0m');
+        term.write('\x1b[32m$\x1b[0m ');
+        return;
+      }
+
+      if (isDangerousCommand(cmd)) {
+        if (agentAutonomy !== 'full-auto') {
+          term.writeln(`\x1b[31m🚫 Blocked: "${cmd}" — dangerous command. Enable Full-Auto mode to override.\x1b[0m`);
+          term.write('\x1b[32m$\x1b[0m ');
+          return;
+        }
+      }
+
+      const parts = cmd.trim().split(/\s+/);
+      const command = parts[0];
+      const args = parts.slice(1);
+
+      try {
+        const { spawn } = await import('@/core/webcontainer/process');
+        const handle = await spawn(command, args, {
+          cwd: '/',
+          onOutput: (data: string) => {
+            term.write(data);
+            appendTerminalOutput(sessionId, data);
+          },
+        });
+
+        sess.stdin = handle.stdin;
+        sess.killProcess = () => handle.kill();
+
+        const exitCode = await handle.exitCode;
+
+        sess.stdin = undefined;
+        sess.killProcess = undefined;
+
+        if (exitCode !== 0) {
+          term.write(`\r\n\x1b[31m[exited ${exitCode}]\x1b[0m\r\n`);
+        } else {
+          term.write('\r\n');
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        term.writeln(`\x1b[31m[Error: ${msg}]\x1b[0m`);
+      }
+
+      term.write('\x1b[32m$\x1b[0m ');
+    },
+    [appendTerminalOutput, agentAutonomy]
+  );
 
   // ── Boot xterm for the active terminal ────────────────────────────────────
   useEffect(() => {
@@ -168,10 +219,9 @@ export function TerminalPanel() {
     async function initXterm() {
       if (!containerRef.current || !mounted) return;
 
-      // Reuse existing xterm session if already created for this id
+      // Reuse existing xterm session
       if (xtermSessions.has(activeTerminalId!)) {
         const sess = xtermSessions.get(activeTerminalId!)!;
-        // Remount into the current container
         containerRef.current.innerHTML = '';
         sess.terminal.open(containerRef.current);
         sess.fitAddon.fit();
@@ -211,7 +261,6 @@ export function TerminalPanel() {
           fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
           fontSize: 13,
           lineHeight: 1.5,
-          letterSpacing: 0,
           cursorBlink: true,
           cursorStyle: 'block',
           scrollback: 5000,
@@ -227,7 +276,6 @@ export function TerminalPanel() {
         fitAddon.fit();
         term.focus();
 
-        // Write welcome banner
         if (!mounted) return;
         term.writeln('\x1b[38;5;10m  ██╗   ██╗███████╗██╗████████╗ ██████╗ ██████╗ ███████╗\x1b[0m');
         term.writeln('\x1b[38;5;10m  ╚██╗ ██╔╝██╔════╝██║╚══██╔══╝██╔═══██╗██╔══██╗██╔════╝\x1b[0m');
@@ -241,74 +289,131 @@ export function TerminalPanel() {
         } else {
           term.writeln('  \x1b[33m⚠ WebContainer initializing\x1b[0m — Commands will run once boot completes.');
         }
+        term.writeln('  \x1b[90mTip: ↑/↓ arrows for history · Ctrl+C to kill · Ctrl+L to clear\x1b[0m');
         term.writeln('');
+        term.write('\x1b[32m$\x1b[0m ');
 
-        // Store the session
-        const sess: XtermSession = { terminal: term, fitAddon };
+        // Create session object with history support
+        const sess: XtermSession = {
+          terminal: term,
+          fitAddon,
+          history: [],
+          historyIdx: -1,
+          lineBuffer: '',
+        };
         xtermSessions.set(activeTerminalId!, sess);
 
-        // Handle user input — buffer line, send on Enter
-        let lineBuffer = '';
-
+        // ── Input handler ─────────────────────────────────────
         term.onData((data: string) => {
-          setInputValue(lineBuffer + data); // Update inputValue state for the warning overlay
           const code = data.charCodeAt(0);
 
-          // Ctrl+C → send SIGINT
+          // Ctrl+C → SIGINT
           if (code === 3) {
             if (sess.stdin) {
               void sess.stdin.write('\x03').catch(() => undefined);
             }
             term.write('^C\r\n');
-            lineBuffer = '';
-            setInputValue(''); // Clear inputValue on Ctrl+C
+            sess.lineBuffer = '';
+            sess.historyIdx = -1;
+            setDangerWarning('');
+            term.write('\x1b[32m$\x1b[0m ');
             return;
           }
 
-          // Ctrl+D → send EOF
+          // Ctrl+D → EOF
           if (code === 4) {
-            if (sess.stdin) {
-              void sess.stdin.write('\x04').catch(() => undefined);
-            }
+            if (sess.stdin) void sess.stdin.write('\x04').catch(() => undefined);
             return;
           }
 
           // Ctrl+L → clear
           if (code === 12) {
             term.clear();
+            term.write('\x1b[32m$\x1b[0m ' + sess.lineBuffer);
             return;
           }
 
-          // If we have a running process, forward raw input directly
+          // If a process is running, forward raw input
           if (sess.stdin) {
             void sess.stdin.write(data).catch(() => undefined);
             return;
           }
 
-          // Otherwise, line-edit mode (echo locally)
+          // ── Arrow keys (history navigation) ────────────────
+          if (data === '\x1b[A') {
+            // Up arrow — older command
+            if (sess.history.length === 0) return;
+            if (sess.historyIdx === -1) {
+              sess.historyIdx = sess.history.length - 1;
+            } else if (sess.historyIdx > 0) {
+              sess.historyIdx--;
+            }
+            const entry = sess.history[sess.historyIdx] ?? '';
+            // Clear current line and rewrite
+            term.write('\x1b[2K\r\x1b[32m$\x1b[0m ' + entry);
+            sess.lineBuffer = entry;
+            setDangerWarning(isDangerousCommand(entry) ? entry : '');
+            return;
+          }
+
+          if (data === '\x1b[B') {
+            // Down arrow — newer command
+            if (sess.historyIdx === -1) return;
+            if (sess.historyIdx < sess.history.length - 1) {
+              sess.historyIdx++;
+              const entry = sess.history[sess.historyIdx] ?? '';
+              term.write('\x1b[2K\r\x1b[32m$\x1b[0m ' + entry);
+              sess.lineBuffer = entry;
+              setDangerWarning(isDangerousCommand(entry) ? entry : '');
+            } else {
+              // Past the end — clear line
+              sess.historyIdx = -1;
+              term.write('\x1b[2K\r\x1b[32m$\x1b[0m ');
+              sess.lineBuffer = '';
+              setDangerWarning('');
+            }
+            return;
+          }
+
+          // Left/Right arrows — ignore (no cursor movement in raw mode)
+          if (data === '\x1b[C' || data === '\x1b[D') return;
+
+          // Enter — submit command
           if (data === '\r') {
-            // Enter — run the command
             term.write('\r\n');
-            const cmd = lineBuffer.trim();
-            lineBuffer = '';
-            setInputValue(''); // Clear inputValue on Enter
+            const cmd = sess.lineBuffer.trim();
+            sess.lineBuffer = '';
+            sess.historyIdx = -1;
+            setDangerWarning('');
+
             if (cmd) {
+              // Add to history (newest last), cap at 100
+              if (sess.history.length === 0 || sess.history[sess.history.length - 1] !== cmd) {
+                sess.history.push(cmd);
+                if (sess.history.length > 100) sess.history.shift();
+              }
               void runXtermCommand(cmd, sess, term, activeTerminalId!);
             } else {
               term.write('\x1b[32m$\x1b[0m ');
             }
-          } else if (data === '\x7f' || data === '\b') {
-            // Backspace
-            if (lineBuffer.length > 0) {
-              lineBuffer = lineBuffer.slice(0, -1);
+            return;
+          }
+
+          // Backspace
+          if (data === '\x7f' || data === '\b') {
+            if (sess.lineBuffer.length > 0) {
+              sess.lineBuffer = sess.lineBuffer.slice(0, -1);
               term.write('\b \b');
+              setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
             }
-          } else if (data === '\x1b[A' || data === '\x1b[B') {
-            // Arrow up/down — ignore for now (no history in raw mode)
-          } else if (code >= 32) {
-            // Printable character
-            lineBuffer += data;
+            return;
+          }
+
+          // Printable character
+          if (code >= 32) {
+            sess.lineBuffer += data;
             term.write(data);
+            setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
           }
         });
 
@@ -325,30 +430,9 @@ export function TerminalPanel() {
     return () => {
       mounted = false;
     };
-  }, [activeTerminalId, appendTerminalOutput, agentAutonomy]); // Add dependencies for useEffect
+  }, [activeTerminalId, runXtermCommand]);
 
-  // ── Replay buffered store output to xterm ─────────────────────────────────
-  // When store has output lines (from agent executor), flush them to xterm
-  useEffect(() => {
-    if (!activeTerminalId || !activeSession) return;
-    const sess = xtermSessions.get(activeTerminalId);
-    if (!sess) return;
-
-    // Flush any output that arrived before xterm was ready
-    // Only flush if xterm is open (containerRef has content)
-    if (activeSession.output.length > 0) {
-      // The original code was only writing the last line. If the intent is to replay ALL buffered output,
-      // a loop should be used. Assuming the current logic is to just ensure the _latest_ state is reflected.
-      // If `activeSession.output` is an array of lines, a loop might be more appropriate here:
-      // activeSession.output.forEach(line => sess.terminal.write(line));
-      const lastLine = activeSession.output[activeSession.output.length - 1];
-      if (lastLine) { // Check if lastLine exists before writing
-        sess.terminal.write(lastLine);
-      }
-    }
-  }, [activeTerminalId, activeSession]); // Removed eslint-disable-line directive and added explicit dependencies
-
-  // ── ResizeObserver for fit ────────────────────────────────────────────────
+  // ── ResizeObserver ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!panelRef.current) return;
     const obs = new ResizeObserver(() => {
@@ -360,11 +444,10 @@ export function TerminalPanel() {
       }
     });
     obs.observe(panelRef.current);
-    resizeObserverRef.current = obs;
     return () => obs.disconnect();
   }, [activeTerminalId]);
 
-  // ── Dispose xterm when tab is removed ─────────────────────────────────────
+  // ── Dispose session ───────────────────────────────────────────────────────
   function disposeXtermSession(id: string) {
     const sess = xtermSessions.get(id);
     if (sess) {
@@ -374,65 +457,6 @@ export function TerminalPanel() {
       xtermSessions.delete(id);
     }
   }
-
-  // ── Run a command via WebContainer ────────────────────────────────────────
-  const runXtermCommand = useCallback(
-    async (cmd: string, sess: XtermSession, term: ITerminal, sessionId: string) => {
-      if (!cmd) return;
-
-      if (!isWebContainerReady()) {
-        term.writeln('\x1b[33m⚠ WebContainer not initialized — boot the workspace first.\x1b[0m');
-        term.write('\x1b[32m$\x1b[0m ');
-        return;
-      }
-
-      if (isDangerousCommand(cmd)) {
-        if (agentAutonomy !== 'full-auto') {
-          term.writeln(`\x1b[31m🚫 Blocked: "${cmd}" — dangerous command. Enable Full-Auto mode to override.\x1b[0m`);
-          term.write('\x1b[32m$\x1b[0m ');
-          return;
-        }
-      }
-
-      const parts = cmd.trim().split(/\s+/);
-      const command = parts[0];
-      const args = parts.slice(1);
-
-      try {
-        const { spawn } = await import('@/core/webcontainer/process');
-        const handle = await spawn(command, args, {
-          cwd: '/',
-          onOutput: (data: string) => {
-            term.write(data);
-            appendTerminalOutput(sessionId, data);
-          },
-        });
-
-        // Store stdin writer and kill for Ctrl+C
-        sess.stdin = handle.stdin;
-        sess.killProcess = () => handle.kill();
-
-        const exitCode = await handle.exitCode;
-
-        // Clear stdin now that process exited
-        sess.stdin = undefined;
-        sess.killProcess = undefined;
-
-        if (exitCode !== 0) {
-          term.write(`\r\n\x1b[31m[exited ${exitCode}]\x1b[0m\r\n`);
-        } else {
-          term.write('\r\n');
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        term.writeln(`\x1b[31m[Error: ${msg}]\x1b[0m`);
-      }
-
-      term.write('\x1b[32m$\x1b[0m ');
-    },
-    [appendTerminalOutput, agentAutonomy]
-  );
-
 
   // ── Tab management ────────────────────────────────────────────────────────
   const newSession = useCallback(() => {
@@ -449,9 +473,7 @@ export function TerminalPanel() {
   const clearTerminal = useCallback(() => {
     if (!activeTerminalId) return;
     const sess = xtermSessions.get(activeTerminalId);
-    if (sess) {
-      sess.terminal.clear();
-    }
+    if (sess) sess.terminal.clear();
   }, [activeTerminalId]);
 
   const sessions = Object.values(terminalSessions);
@@ -495,7 +517,6 @@ export function TerminalPanel() {
 
         <div className="flex-1" />
 
-        {/* Status + clear */}
         <div className="flex items-center gap-2 pr-2">
           <button
             className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
@@ -537,7 +558,6 @@ export function TerminalPanel() {
           if (sess) sess.terminal.focus();
         }}
       >
-        {/* The actual xterm.js mount point */}
         <div
           ref={containerRef}
           className="absolute inset-0"
@@ -546,7 +566,6 @@ export function TerminalPanel() {
           aria-label="Terminal output"
         />
 
-        {/* Loading state while xterm is being fetched */}
         {!xtermReady && !loadError && (
           <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--bg-void)' }}>
             <div className="text-center">
@@ -562,7 +581,6 @@ export function TerminalPanel() {
           </div>
         )}
 
-        {/* Error state */}
         {loadError && (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-4" style={{ background: 'var(--bg-void)' }}>
             <AlertTriangle size={20} style={{ color: 'var(--danger)' }} className="mb-2" aria-hidden="true" />
@@ -576,8 +594,8 @@ export function TerminalPanel() {
         )}
       </div>
 
-      {/* Dangerous command warning overlay (for typed input that we can observe) */}
-      {inputValue && isDangerousCommand(inputValue) && (
+      {/* Dangerous command warning */}
+      {dangerWarning && (
         <div
           className="flex items-center gap-2 px-3 py-1.5 border-t text-xs flex-shrink-0"
           style={{ borderColor: 'rgba(255,77,109,0.2)', background: 'rgba(255,77,109,0.06)', color: 'var(--danger)' }}
