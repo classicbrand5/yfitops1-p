@@ -1,7 +1,10 @@
 // src/components/layout/StatusBar.tsx
 import React from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { GitBranch, AlertTriangle, Info, Check } from 'lucide-react';
+import { GitBranch, AlertTriangle, Info, Check, Bot, Zap } from 'lucide-react';
+import { isWebContainerReady } from '@/core/webcontainer/webcontainer';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 
 export function StatusBar() {
   const {
@@ -11,11 +14,30 @@ export function StatusBar() {
     openTabs,
     activeTabId,
     workspaceReady,
+    user,
   } = useAppStore();
 
   const activeTab = openTabs.find((t) => t.id === activeTabId);
   const encoding = 'UTF-8';
   const indentation = 'Spaces: 2';
+  const wcReady = isWebContainerReady();
+
+  // Fetch AI usage counter
+  const { data: aiUsage } = useQuery({
+    queryKey: ['ai-usage-statusbar', user?.id],
+    queryFn: async () => {
+      if (!supabase || !user) return null;
+      const { data } = await supabase
+        .from('profiles')
+        .select('ai_requests_used,ai_requests_limit')
+        .eq('id', user.id)
+        .single();
+      return data;
+    },
+    enabled: !!supabase && !!user,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  });
 
   return (
     <footer
@@ -38,18 +60,21 @@ export function StatusBar() {
 
       <div style={{ color: 'var(--border-default)' }}>|</div>
 
-      {/* Workspace status */}
+      {/* WebContainer status dot */}
       <div className="flex items-center gap-1.5 flex-shrink-0">
+        <span
+          className="w-1.5 h-1.5 rounded-full"
+          style={{
+            background: wcReady ? 'var(--success)' : 'var(--warning)',
+            boxShadow: wcReady ? '0 0 4px var(--success)' : undefined,
+            animation: !wcReady ? 'pulse 1s ease-in-out infinite' : undefined,
+          }}
+          aria-hidden="true"
+        />
         {workspaceReady ? (
-          <>
-            <Check size={10} style={{ color: 'var(--success)' }} />
-            <span style={{ color: 'var(--success)' }}>Workspace Ready</span>
-          </>
+          <span style={{ color: 'var(--success)' }}>Ready</span>
         ) : (
-          <>
-            <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--warning)' }} aria-hidden="true" />
-            <span style={{ color: 'var(--warning)' }}>Initializing…</span>
-          </>
+          <span style={{ color: 'var(--warning)' }}>Initializing…</span>
         )}
       </div>
 
@@ -85,6 +110,20 @@ export function StatusBar() {
 
       {/* Spacer */}
       <div className="flex-1" />
+
+      {/* AI usage counter */}
+      {aiUsage && (
+        <>
+          <div className="flex items-center gap-1.5 flex-shrink-0"
+            style={{ color: (aiUsage.ai_requests_used / aiUsage.ai_requests_limit) > 0.85 ? 'var(--warning)' : 'var(--text-muted)' }}
+            title={`AI requests: ${aiUsage.ai_requests_used} / ${aiUsage.ai_requests_limit} this month`}
+          >
+            <Bot size={10} aria-hidden="true" />
+            <span>{aiUsage.ai_requests_used}/{aiUsage.ai_requests_limit}</span>
+          </div>
+          <div style={{ color: 'var(--border-default)' }}>|</div>
+        </>
+      )}
 
       {/* Right side info */}
       {activeTab && (

@@ -69,6 +69,7 @@ export function useFileSystem() {
     deleteFile,
     createFile,
     createDir,
+    createDirectory: createDir,  // alias used by FileTreeNode context menu
     readFileContent,
     activeTabId,
   };

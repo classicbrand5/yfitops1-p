@@ -2,7 +2,7 @@
 # The Complete Technical & Design Reference
 
 > **Living document** — updated every phase.  
-> Last updated: **Phase 11-13** (agent auto-execute, xterm history, Settings Supabase persistence, GitHub REST API integration, Analytics real RPC data, Stripe billing, create-checkout + stripe-webhook edge functions)
+> Last updated: **Phase 14-15** (ConfirmModal data-loss gate, Monaco ViewState, action CSS tokens, Expert steps panel, File heatmap, WorkspaceErrorBoundary, ConversationSync, StatusBar upgrades, AgentContextPanel, Workspace Snapshots, fetch-repo-zip edge function)
 
 ---
 
@@ -305,9 +305,23 @@ Single Zustand store with `subscribeWithSelector` + `persist` middleware. No imm
 | ONSPACE_AI_API_KEY | Supabase secrets | OnSpace AI API key |
 | ONSPACE_AI_BASE_URL | Supabase secrets | OnSpace AI base URL |
 
----
+### 5.3 New Edge Functions (Phase 14-15)
+| Function | Purpose |
+|---|---|
+| `create-checkout` | Stripe subscription checkout session |
+| `stripe-webhook` | Stripe event handler (plan updates) |
+| `fetch-repo-zip` | Proxies GitHub repo zip download (bypasses CORS) |
 
-## 6. Core Features
+### 5.4 New Hooks (Phase 14-15)
+| Hook | Purpose |
+|---|---|
+| `useConversationSync` | Debounced 2s upsert of conversations + messages to Supabase |
+
+### 5.5 New Utilities (Phase 14-15)
+| File | Purpose |
+|---|---|
+| `src/core/webcontainer/snapshots.ts` | Capture/restore full filesystem snapshots, localStorage FIFO 5-max |
+
 
 ### 6.0 GitHub Integration (`src/lib/github.ts`)
 
@@ -640,6 +654,7 @@ manualChunks: {
 | 9 | WebContainer ENOENT fix, agentExecutor wired to UI, 401 auth fix |
 | 10 | Real xterm.js terminal, Monaco model disposal, Dashboard RPC stats, PromptBar file attach, notification persistence |
 | 11-13 | Agent auto-execute (full-auto/auto-safe), xterm command history, Settings → Supabase, GitHub REST API, Analytics real RPC, Stripe checkout + webhook |
+| 14-15 | ConfirmModal gate (data-loss prevention), Monaco ViewState, action CSS tokens, Expert mode steps in AgentMessage, File heatmap in FileTreeNode, enhanced context menu with ConfirmModal delete, WorkspaceErrorBoundary, ConversationSync to Supabase, StatusBar AI counter + WebContainer dot, AgentContextPanel chips, Workspace Snapshot system, fetch-repo-zip edge function, React.lazy import fixes |
 
 ---
 

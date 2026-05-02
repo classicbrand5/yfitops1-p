@@ -2,6 +2,7 @@
 // src/components/features/Editor/CodeEditor.tsx
 // Uses @monaco-editor/react to avoid manual worker config and bundle issues.
 // Custom yfitops-dark theme is registered in the beforeMount callback.
+// ViewState (scroll + cursor + undo) is preserved per tab on switch.
 
 import React, { useRef, useCallback } from 'react';
 import MonacoEditor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
@@ -52,6 +53,9 @@ export function CodeEditor() {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  // ViewState map: filePath -> ICodeEditorViewState | null
+  // Preserves scroll position, cursor, and undo stack per tab
+  const viewStatesRef = useRef<Map<string, Monaco.editor.ICodeEditorViewState | null>>(new Map());
 
   const { openTabs, activeTabId, markTabDirty, setCursorPosition, setEditorMarkers } = useAppStore();
   const { readFileContent, saveFile } = useFileSystem();
@@ -131,6 +135,13 @@ export function CodeEditor() {
     async function loadFile() {
       if (!activeTab || !editor || !monaco) return;
 
+      // Save view state of the tab we're LEAVING
+      const currentModel = editor.getModel();
+      if (currentModel) {
+        const leavingPath = currentModel.uri.path;
+        viewStatesRef.current.set(leavingPath, editor.saveViewState());
+      }
+
       const uri = monaco.Uri.file(activeTab.path);
       let model = monaco.editor.getModel(uri);
 
@@ -156,14 +167,15 @@ export function CodeEditor() {
       }
 
       editor.setModel(model);
+
+      // Restore view state of the tab we're ENTERING
+      const savedState = viewStatesRef.current.get(activeTab.path);
+      if (savedState) {
+        editor.restoreViewState(savedState);
+      }
     }
 
     loadFile();
-    // The error message indicates that 'react-hooks/exhaustive-deps' rule is not found.
-    // This is typically an ESLint configuration issue, not a TypeScript syntax error.
-    // However, if the intent was to disable the rule, the comment itself is not a syntax error.
-    // Since the task is to fix syntax errors, and this comment is syntactically valid TypeScript,
-    // no change is needed for the comment itself. The error is external to the TS parser.
   }, [activeTab?.id, activeTab?.path]);
 
   // ── Empty state ────────────────────────────────────────────

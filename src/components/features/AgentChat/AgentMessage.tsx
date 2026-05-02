@@ -1,7 +1,8 @@
 // src/components/features/AgentChat/AgentMessage.tsx
 import React, { useState } from 'react';
 import { ActionCard } from './ActionCard';
-import { Copy, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { Copy, Check, ThumbsUp, ThumbsDown, Cpu, ChevronDown } from 'lucide-react';
 import { executeActions } from '@/core/agent/agentExecutor';
 import { useAppStore } from '@/store/useAppStore';
 import { useFileSystem } from '@/hooks/useFileSystem';
@@ -40,9 +41,13 @@ function SimpleMarkdown({ content }: { content: string }) {
   );
 }
 
+// Actions that ALWAYS need a confirmation gate regardless of autonomy
+const ALWAYS_CONFIRM = ['delete_file', 'open_pr'] as const;
+
 export function AgentMessage({ message }: AgentMessageProps) {
   const [copied, setCopied] = useState(false);
-  const { agentAutonomy, appendTerminalOutput, activeTerminalId, updateActionStatus, addNotification } = useAppStore();
+  const [pendingConfirm, setPendingConfirm] = useState<{ action: AgentAction; idx: number } | null>(null);
+  const { agentAutonomy, expertMode, appendTerminalOutput, activeTerminalId, updateActionStatus, addNotification } = useAppStore();
   const { refreshTree } = useFileSystem();
   const isUser = message.role === 'user';
 
@@ -55,6 +60,18 @@ export function AgentMessage({ message }: AgentMessageProps) {
   async function handleApprove(actionIdx: number) {
     if (!message.actions?.[actionIdx]) return;
     const action = message.actions[actionIdx];
+
+    // Gate for destructive / confirmation-required actions
+    const needsGate = action.requiresConfirmation || (ALWAYS_CONFIRM as readonly string[]).includes(action.type);
+    if (needsGate) {
+      setPendingConfirm({ action, idx: actionIdx });
+      return;
+    }
+
+    await executeApproved(action, actionIdx);
+  }
+
+  async function executeApproved(action: AgentAction, actionIdx: number) {
 
     updateActionStatus(message.id, actionIdx, 'executing');
 
@@ -86,6 +103,18 @@ export function AgentMessage({ message }: AgentMessageProps) {
 
   function handleReject(actionIdx: number) {
     updateActionStatus(message.id, actionIdx, 'rejected');
+  }
+
+  // Confirm modal resolution
+  function onConfirmAction() {
+    if (!pendingConfirm) return;
+    const { action, idx } = pendingConfirm;
+    setPendingConfirm(null);
+    void executeApproved(action, idx);
+  }
+
+  function onCancelAction() {
+    setPendingConfirm(null);
   }
 
   if (isUser) {
@@ -127,6 +156,24 @@ export function AgentMessage({ message }: AgentMessageProps) {
   }
 
   return (
+    <>
+    {/* Confirm modal for destructive actions */}
+    {pendingConfirm && (
+      <ConfirmModal
+        open
+        title={pendingConfirm.action.type === 'delete_file' ? 'Delete file?' : 'Confirm action'}
+        description={
+          pendingConfirm.action.type === 'delete_file'
+            ? 'This will permanently delete the file. This action cannot be undone.'
+            : pendingConfirm.action.explanation
+        }
+        detail={pendingConfirm.action.path ?? pendingConfirm.action.command}
+        isDestructive={pendingConfirm.action.type === 'delete_file'}
+        confirmLabel={pendingConfirm.action.type === 'delete_file' ? 'Delete' : 'Confirm'}
+        onConfirm={onConfirmAction}
+        onCancel={onCancelAction}
+      />
+    )}
     <div className="flex items-start gap-3 animate-fade-up" role="article" aria-label="AI agent message">
       {/* Avatar */}
       <div
@@ -179,6 +226,39 @@ export function AgentMessage({ message }: AgentMessageProps) {
           )}
         </div>
 
+        {/* Expert mode steps */}
+        {expertMode && message.steps && (
+          <div className="mt-3">
+            <details className="group">
+              <summary
+                className="flex items-center gap-2 cursor-pointer list-none text-xs py-2 px-3 rounded-lg select-none transition-all hover:opacity-80"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', color: 'var(--violet-400)', fontFamily: 'var(--font-body)' }}
+              >
+                <Cpu size={11} aria-hidden="true" />
+                <span>Agent Reasoning</span>
+                <ChevronDown size={11} className="ml-auto transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div
+                className="mt-2 p-3 rounded-lg text-xs"
+                style={{ background: 'var(--bg-elevated)', borderLeft: '2px solid var(--violet-400)', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', lineHeight: 1.6 }}
+              >
+                {message.steps.draft && (
+                  <div className="mb-3">
+                    <span className="block text-xs font-semibold mb-1" style={{ color: 'var(--violet-400)', fontFamily: 'var(--font-body)' }}>Draft Thinking</span>
+                    <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.steps.draft}</p>
+                  </div>
+                )}
+                {message.steps.critique && (
+                  <div>
+                    <span className="block text-xs font-semibold mb-1" style={{ color: 'var(--violet-400)', fontFamily: 'var(--font-body)' }}>Self-Critique</span>
+                    <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.steps.critique}</p>
+                  </div>
+                )}
+              </div>
+            </details>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex items-center gap-3 mt-1">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatTime(message.timestamp)}</p>
@@ -193,5 +273,6 @@ export function AgentMessage({ message }: AgentMessageProps) {
         </div>
       </div>
     </div>
+    </>
   );
 }

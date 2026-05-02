@@ -84,6 +84,7 @@ export interface ConversationMessage {
   isStreaming?: boolean;
   actions?: AgentAction[];
   executionResults?: ActionResult[];
+  steps?: AgentStep;  // Expert mode reasoning steps
   error?: string;
 }
 

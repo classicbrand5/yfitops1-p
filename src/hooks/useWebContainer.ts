@@ -1,4 +1,18 @@
-// src/hooks/useWebContainer.ts — Phase 3: real boot with progress states + seed files
+
+/**
+ * ARCHITECTURAL CONTRACT — window.__yfitops_container
+ * ─────────────────────────────────────────────────────
+ * AgentChat lives deep in the component tree and needs the WebContainer
+ * instance to execute actions. Prop-drilling this through WorkspacePage
+ * would require a React Context wrapper that restructures the entire layout.
+ *
+ * Solution: useWebContainer sets this global after boot. AgentChat polls
+ * it every 500ms until available, stores in containerRef.
+ *
+ * DO NOT remove or replace without a full Context refactor plan.
+ * Polling stops as soon as the reference is acquired (clearInterval).
+ */
+// Phase 3: real boot with progress states + seed files
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { getWebContainer, isWebContainerReady } from '@/core/webcontainer/webcontainer';

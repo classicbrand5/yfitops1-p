@@ -1,10 +1,11 @@
 // src/components/features/AgentChat/AgentChat.tsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAIAgent } from '@/hooks/useAIAgent';
 import { AgentMessage } from './AgentMessage';
 import { AgentThinking } from './AgentThinking';
 import { PromptBar } from './PromptBar';
 import { useAppStore } from '@/store/useAppStore';
+import { useConversationSync } from '@/hooks/useConversationSync';
 import { Plus, MessageSquare, Trash2, LogIn } from 'lucide-react';
 
 export function AgentChat() {
@@ -21,9 +22,16 @@ export function AgentChat() {
     setActiveConversation,
   } = useAIAgent();
 
+  // Sync conversations to Supabase
+  const { syncToSupabase } = useConversationSync();
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeMessages, isThinking]);
+    // Sync to Supabase after each message
+    if (activeConversationId) {
+      syncToSupabase(activeConversationId);
+    }
+  }, [activeMessages, isThinking, activeConversationId]);
 
   // Create initial conversation if none
   useEffect(() => {

@@ -12,6 +12,21 @@ interface ActionCardProps {
   showControls?: boolean;
 }
 
+// Action type → CSS token mapping (uses var(--action-*) tokens from index.css)
+function getActionColor(type: AgentAction['type']): string {
+  switch (type) {
+    case 'read_file':   return 'var(--action-read)';
+    case 'search_files':return 'var(--action-read)';
+    case 'write_file':  return 'var(--action-write)';
+    case 'open_pr':     return 'var(--action-write)';
+    case 'edit_file':   return 'var(--action-edit)';
+    case 'delete_file': return 'var(--action-delete)';
+    case 'create_dir':  return 'var(--action-dir)';
+    case 'run_command': return 'var(--action-run)';
+    default:            return 'var(--text-muted)';
+  }
+}
+
 function getActionIcon(type: AgentAction['type']) {
   switch (type) {
     case 'run_command': return Terminal;
@@ -80,9 +95,9 @@ export function ActionCard({ action, index, onApprove, onReject, showControls = 
         <div
           className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs flex-shrink-0"
           style={{
-            background: 'rgba(124,58,237,0.12)',
-            border: '1px solid rgba(124,58,237,0.2)',
-            color: 'var(--violet-400)',
+            background: `color-mix(in srgb, ${getActionColor(action.type)} 12%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${getActionColor(action.type)} 25%, transparent)`,
+            color: getActionColor(action.type),
             fontFamily: 'var(--font-mono)',
             fontSize: 10,
           }}
