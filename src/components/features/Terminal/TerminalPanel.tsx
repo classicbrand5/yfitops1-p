@@ -1,89 +1,201 @@
 
 // src/components/features/Terminal/TerminalPanel.tsx
-// Real xterm.js terminal — multi-tab, WebContainer wired, ANSI color support
-// xterm loaded via dynamic import (CDN) so no package.json change needed
+// Pure React terminal emulator — no external packages required.
+// Handles ANSI colors, command history, WebContainer stdin/stdout, multi-tab.
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useLayoutEffect,
+} from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { isWebContainerReady } from '@/core/webcontainer/webcontainer';
 import { isDangerousCommand } from '@/core/webcontainer/process';
 import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
-// ── xterm types (minimal, for TS without the package installed) ──────────────
-interface ITerminal {
-  open(el: HTMLElement): void;
-  write(data: string): void;
-  writeln(data: string): void;
-  onData(callback: (data: string) => void): void;
-  dispose(): void;
-  clear(): void;
-  focus(): void;
-  cols: number;
-  rows: number;
-}
+// ── ANSI → React spans ────────────────────────────────────────────────────────
 
-interface IFitAddon {
-  activate(terminal: ITerminal): void;
-  fit(): void;
-  dispose(): void;
-}
-
-type TerminalLib = {
-  Terminal: new (opts: Record<string, unknown>) => ITerminal;
-};
-type FitAddonLib = {
-  FitAddon: new () => IFitAddon;
+const ANSI_COLORS: Record<number, string> = {
+  30: '#1e1e2e', 31: '#FF4D6D', 32: '#00F5A0', 33: '#FBBF24',
+  34: '#38BDF8', 35: '#9B6EF5', 36: '#00D4D8', 37: '#EEEEFF',
+  90: '#5C5C7A', 91: '#FF6B84', 92: '#1AFFB8', 93: '#FCD34D',
+  94: '#60CDFF', 95: '#B48EFF', 96: '#1AFFDC', 97: '#FFFFFF',
+  // Background colors (40-47 + 100-107) mapped to text for simplicity
+  40: '#0C0C12', 41: '#FF4D6D', 42: '#00F5A0', 43: '#FBBF24',
+  44: '#38BDF8', 45: '#9B6EF5', 46: '#00D4D8', 47: '#EEEEFF',
 };
 
-// ── Singleton xterm loader ────────────────────────────────────────────────────
-let _xtermLib: TerminalLib | null = null;
-let _fitLib: FitAddonLib | null = null;
-let _loading: Promise<void> | null = null;
+interface AnsiSpan {
+  text: string;
+  color?: string;
+  bold?: boolean;
+  dim?: boolean;
+  underline?: boolean;
+}
 
-async function loadXterm(): Promise<{ TerminalCtor: TerminalLib['Terminal']; FitAddonCtor: FitAddonLib['FitAddon'] }> {
-  if (_xtermLib && _fitLib) {
-    return { TerminalCtor: _xtermLib.Terminal, FitAddonCtor: _fitLib.FitAddon };
-  }
-  if (!_loading) {
-    _loading = (async () => {
-      // Load from esm.sh — works without package.json changes
-      // esm.sh serves with proper CORS headers for crossOriginIsolated environments
-      const [xt, fa] = await Promise.all([
-        import(/* @vite-ignore */ 'https://esm.sh/@xterm/xterm@5.3.0'),
-        import(/* @vite-ignore */ 'https://esm.sh/@xterm/addon-fit@0.8.0'),
-      ]);
-      _xtermLib = xt as TerminalLib;
-      _fitLib = fa as FitAddonLib;
+function parseAnsi(raw: string): AnsiSpan[] {
+  const spans: AnsiSpan[] = [];
+  // Split on ESC sequences
+  const parts = raw.split(/(\x1b\[[0-9;]*m)/g);
+  let color: string | undefined;
+  let bold = false;
+  let dim = false;
+  let underline = false;
 
-      // Load xterm CSS dynamically
-      if (!document.getElementById('xterm-css')) {
-        const link = document.createElement('link');
-        link.id = 'xterm-css';
-        link.rel = 'stylesheet';
-        link.href = 'https://esm.sh/@xterm/xterm@5.3.0/css/xterm.css';
-        document.head.appendChild(link);
+  for (const part of parts) {
+    if (part.startsWith('\x1b[') && part.endsWith('m')) {
+      const codes = part.slice(2, -1).split(';').map(Number);
+      for (const code of codes) {
+        if (code === 0) { color = undefined; bold = false; dim = false; underline = false; }
+        else if (code === 1) bold = true;
+        else if (code === 2) dim = true;
+        else if (code === 4) underline = true;
+        else if (code === 22) { bold = false; dim = false; }
+        else if (code === 24) underline = false;
+        else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+          color = ANSI_COLORS[code];
+        }
+        else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
+          // background — ignore for simplicity
+        }
+        else if (code === 39) color = undefined;
       }
-    })();
+    } else if (part) {
+      spans.push({ text: part, color, bold, dim, underline });
+    }
   }
-  await _loading;
-  return { TerminalCtor: _xtermLib!.Terminal, FitAddonCtor: _fitLib!.FitAddon };
+
+  return spans;
 }
 
-// ── Per-session state ────────────────────────────────────────────────────────
-interface XtermSession {
-  terminal: ITerminal;
-  fitAddon: IFitAddon;
+// ── TerminalLine ──────────────────────────────────────────────────────────────
+
+interface TerminalLine {
+  id: number;
+  raw: string;       // raw string with ANSI
+  spans: AnsiSpan[]; // parsed
+}
+
+let _lineId = 0;
+function makeLines(text: string): TerminalLine[] {
+  // Split into lines by \r\n, \n, \r
+  const segments = text.split(/\r?\n|\r/);
+  return segments.map((s) => ({
+    id: ++_lineId,
+    raw: s,
+    spans: parseAnsi(s),
+  }));
+}
+
+// ── Session state ─────────────────────────────────────────────────────────────
+
+interface TermSession {
+  id: string;
+  lines: TerminalLine[];
+  lineBuffer: string;
+  history: string[];     // oldest first
+  historyIdx: number;    // -1 = not navigating
   stdin?: WritableStreamDefaultWriter<string>;
   killProcess?: () => void;
-  history: string[];         // command history (newest last)
-  historyIdx: number;        // -1 = not navigating
-  lineBuffer: string;        // current typed line
+  isRunning: boolean;
 }
 
-const xtermSessions = new Map<string, XtermSession>();
+const sessions = new Map<string, TermSession>();
 
-// ── Tab component ─────────────────────────────────────────────────────────────
+function getOrCreateSession(id: string): TermSession {
+  if (!sessions.has(id)) {
+    sessions.set(id, {
+      id,
+      lines: [],
+      lineBuffer: '',
+      history: [],
+      historyIdx: -1,
+      isRunning: false,
+    });
+  }
+  return sessions.get(id)!;
+}
+
+// ── TerminalOutput ────────────────────────────────────────────────────────────
+
+function SpanEl({ span }: { span: AnsiSpan }) {
+  return (
+    <span
+      style={{
+        color: span.color,
+        fontWeight: span.bold ? 700 : undefined,
+        opacity: span.dim ? 0.5 : undefined,
+        textDecoration: span.underline ? 'underline' : undefined,
+      }}
+    >
+      {span.text}
+    </span>
+  );
+}
+
+interface TerminalOutputProps {
+  lines: TerminalLine[];
+  lineBuffer: string;
+  showCursor: boolean;
+}
+
+const TerminalOutput = React.memo(function TerminalOutput({
+  lines,
+  lineBuffer,
+  showCursor,
+}: TerminalOutputProps) {
+  return (
+    <div
+      style={{
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+        fontSize: 13,
+        lineHeight: 1.6,
+        color: '#EEEEFF',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+        padding: '8px 12px',
+        minHeight: '100%',
+      }}
+      aria-live="polite"
+      aria-label="Terminal output"
+      role="log"
+    >
+      {lines.map((line) => (
+        <div key={line.id} style={{ minHeight: '1.6em' }}>
+          {line.spans.length > 0
+            ? line.spans.map((s, i) => <SpanEl key={i} span={s} />)
+            : '\u200b'}
+        </div>
+      ))}
+      {/* Input line with cursor */}
+      <div style={{ minHeight: '1.6em', display: 'flex', alignItems: 'center' }}>
+        <span style={{ color: '#00F5A0' }}>$</span>
+        <span>&nbsp;</span>
+        <span style={{ color: '#EEEEFF' }}>{lineBuffer}</span>
+        {showCursor && (
+          <span
+            style={{
+              display: 'inline-block',
+              width: '0.55em',
+              height: '1.1em',
+              background: '#00F5A0',
+              marginLeft: 1,
+              verticalAlign: 'text-bottom',
+              animation: 'term-blink 1s step-end infinite',
+            }}
+            aria-hidden="true"
+          />
+        )}
+      </div>
+    </div>
+  );
+});
+
+// ── TerminalTab ───────────────────────────────────────────────────────────────
+
 interface TerminalTabProps {
   sessionId: string;
   isActive: boolean;
@@ -93,7 +205,7 @@ interface TerminalTabProps {
   onClose: () => void;
 }
 
-function TerminalTab({ isActive, title, isRunning, onActivate, onClose }: TerminalTabProps) {
+function TerminalTabEl({ isActive, title, isRunning, onActivate, onClose }: TerminalTabProps) {
   return (
     <div
       className={`tab-item ${isActive ? 'active' : ''}`}
@@ -109,8 +221,8 @@ function TerminalTab({ isActive, title, isRunning, onActivate, onClose }: Termin
       >
         {isRunning && (
           <span
-            className="flex-shrink-0 status-dot-green animate-pulse-glow"
-            style={{ width: 6, height: 6 }}
+            className="flex-shrink-0 animate-pulse"
+            style={{ width: 6, height: 6, borderRadius: '50%', background: '#00F5A0' }}
             aria-label="Running"
           />
         )}
@@ -118,7 +230,7 @@ function TerminalTab({ isActive, title, isRunning, onActivate, onClose }: Termin
       </button>
       <button
         className="flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-sm ml-1"
-        style={{ color: 'var(--text-muted)' }}
+        style={{ color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         aria-label={`Close terminal ${title}`}
       >
@@ -129,12 +241,13 @@ function TerminalTab({ isActive, title, isRunning, onActivate, onClose }: Termin
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
+
 export function TerminalPanel() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [, forceRender] = useState(0);
+  const [focused, setFocused] = useState(false);
   const [dangerWarning, setDangerWarning] = useState('');
-  const [xtermReady, setXtermReady] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const {
     terminalSessions,
@@ -146,7 +259,10 @@ export function TerminalPanel() {
     agentAutonomy,
   } = useAppStore();
 
-  // ── Create initial session ─────────────────────────────────────────────────
+  // Stable force-render callback
+  const refresh = useCallback(() => forceRender((n) => n + 1), []);
+
+  // ── Ensure at least one session ──────────────────────────────────────────
   useEffect(() => {
     if (Object.keys(terminalSessions).length === 0) {
       const id = `term-${Date.now()}`;
@@ -154,36 +270,87 @@ export function TerminalPanel() {
     }
   }, [createTerminalSession, terminalSessions]); // Added terminalSessions to deps
 
-  // ── Run a command via WebContainer ────────────────────────────────────────
-  const runXtermCommand = useCallback(
-    async (cmd: string, sess: XtermSession, term: ITerminal, sessionId: string) => {
-      if (!cmd) return;
+  // ── Append text to the active session's lines ──────────────────────────
+  const appendOutput = useCallback(
+    (sessionId: string, text: string) => {
+      const sess = getOrCreateSession(sessionId);
+      // Handle carriage-return-only lines (overwrite last line)
+      // For simplicity we split and append new lines
+      const newLines = makeLines(text);
+      sess.lines.push(...newLines);
+      // Cap at 5000 lines
+      if (sess.lines.length > 5000) {
+        sess.lines = sess.lines.slice(sess.lines.length - 4500);
+      }
+      appendTerminalOutput(sessionId, text);
+      refresh();
+    },
+    [appendTerminalOutput, refresh]
+  );
+
+  // Write welcome banner on first session creation
+  useEffect(() => {
+    if (!activeTerminalId) return;
+    const sess = getOrCreateSession(activeTerminalId);
+    if (sess.lines.length === 0) {
+      const banner = [
+        '\x1b[32m  ╔══════════════════════════════╗\x1b[0m',
+        '\x1b[32m  ║   YFitOps Terminal  v1.0     ║\x1b[0m',
+        '\x1b[32m  ╚══════════════════════════════╝\x1b[0m',
+        '',
+        isWebContainerReady()
+          ? '\x1b[32m  ✓ WebContainer ready\x1b[0m — Real sandboxed shell. Type commands and press Enter.'
+          : '\x1b[33m  ⚠ WebContainer initializing\x1b[0m — Commands will execute once boot completes.',
+        '  \x1b[90mTip: ↑/↓ arrows for history · Ctrl+C to kill · Ctrl+L to clear\x1b[0m',
+        '',
+      ];
+      for (const line of banner) {
+        sess.lines.push(...makeLines(line));
+      }
+      refresh();
+    }
+  }, [activeTerminalId, refresh]);
+
+  // ── Auto-scroll to bottom when lines change ──────────────────────────────
+  useLayoutEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  });
+
+  // ── Run command via WebContainer ────────────────────────────────────────
+  const runCommand = useCallback(
+    async (cmd: string, sessionId: string) => {
+      const sess = getOrCreateSession(sessionId);
+      if (!cmd.trim()) return;
 
       if (!isWebContainerReady()) {
-        term.writeln('\x1b[33m⚠ WebContainer not initialized — boot the workspace first.\x1b[0m');
-        term.write('\x1b[32m$\x1b[0m ');
+        sess.lines.push(...makeLines('\x1b[33m⚠ WebContainer not initialized — boot the workspace first.\x1b[0m'));
+        refresh();
         return;
       }
 
-      if (isDangerousCommand(cmd)) {
-        if (agentAutonomy !== 'full-auto') {
-          term.writeln(`\x1b[31m🚫 Blocked: "${cmd}" — dangerous command. Enable Full-Auto mode to override.\x1b[0m`);
-          term.write('\x1b[32m$\x1b[0m ');
-          return;
-        }
+      if (isDangerousCommand(cmd) && agentAutonomy !== 'full-auto') {
+        sess.lines.push(...makeLines(
+          `\x1b[31m🚫 Blocked: "${cmd}" — dangerous command. Enable Full-Auto mode to override.\x1b[0m`
+        ));
+        refresh();
+        return;
       }
 
       const parts = cmd.trim().split(/\s+/);
       const command = parts[0];
       const args = parts.slice(1);
 
+      sess.isRunning = true;
+      refresh();
+
       try {
         const { spawn } = await import('@/core/webcontainer/process');
         const handle = await spawn(command, args, {
           cwd: '/',
           onOutput: (data: string) => {
-            term.write(data);
-            appendTerminalOutput(sessionId, data);
+            appendOutput(sessionId, data);
           },
         });
 
@@ -191,272 +358,152 @@ export function TerminalPanel() {
         sess.killProcess = () => handle.kill();
 
         const exitCode = await handle.exitCode;
-
         sess.stdin = undefined;
         sess.killProcess = undefined;
+        sess.isRunning = false;
 
         if (exitCode !== 0) {
-          term.write(`\r\n\x1b[31m[exited ${exitCode}]\x1b[0m\r\n`);
-        } else {
-          term.write('\r\n');
+          sess.lines.push(...makeLines(`\x1b[31m[exited ${exitCode}]\x1b[0m`));
         }
+        refresh();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        term.writeln(`\x1b[31m[Error: ${msg}]\x1b[0m`);
+        sess.lines.push(...makeLines(`\x1b[31m[Error: ${msg}]\x1b[0m`));
+        sess.isRunning = false;
+        refresh();
       }
-
-      term.write('\x1b[32m$\x1b[0m ');
     },
-    [appendTerminalOutput, agentAutonomy]
+    [appendOutput, refresh, agentAutonomy]
   );
 
-  // ── Boot xterm for the active terminal ────────────────────────────────────
-  useEffect(() => {
-    if (!activeTerminalId || !containerRef.current) return;
+  // ── Key handler ────────────────────────────────────────────────────────
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!activeTerminalId) return;
+      const sess = getOrCreateSession(activeTerminalId);
 
-    let mounted = true;
-
-    async function initXterm() {
-      if (!containerRef.current || !mounted) return;
-
-      // Reuse existing xterm session
-      if (xtermSessions.has(activeTerminalId!)) {
-        const sess = xtermSessions.get(activeTerminalId!)!;
-        containerRef.current.innerHTML = '';
-        sess.terminal.open(containerRef.current);
-        sess.fitAddon.fit();
-        sess.terminal.focus();
-        setXtermReady(true);
+      // Ctrl+C — SIGINT
+      if (e.ctrlKey && e.key === 'c') {
+        e.preventDefault();
+        if (sess.stdin) {
+          void sess.stdin.write('\x03').catch(() => undefined);
+        }
+        sess.lines.push(...makeLines('^C'));
+        sess.lineBuffer = '';
+        sess.historyIdx = -1;
+        setDangerWarning('');
+        refresh();
         return;
       }
 
-      try {
-        const { TerminalCtor, FitAddonCtor } = await loadXterm();
-        if (!mounted || !containerRef.current) return;
+      // Ctrl+D — EOF
+      if (e.ctrlKey && e.key === 'd') {
+        e.preventDefault();
+        if (sess.stdin) void sess.stdin.write('\x04').catch(() => undefined);
+        return;
+      }
 
-        const term = new TerminalCtor({
-          theme: {
-            background: '#060609',
-            foreground: '#EEEEFF',
-            cursor: '#00F5A0',
-            cursorAccent: '#060609',
-            black: '#0C0C12',
-            red: '#FF4D6D',
-            green: '#00F5A0',
-            yellow: '#FBBF24',
-            blue: '#38BDF8',
-            magenta: '#9B6EF5',
-            cyan: '#00D4D8',
-            white: '#9494B8',
-            brightBlack: '#5C5C7A',
-            brightRed: '#FF6B84',
-            brightGreen: '#1AFFB8',
-            brightYellow: '#FCD34D',
-            brightBlue: '#60CDFF',
-            brightMagenta: '#B48EFF',
-            brightCyan: '#1AFFDC',
-            brightWhite: '#EEEEFF',
-            selectionBackground: 'rgba(124,58,237,0.35)',
-          },
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-          fontSize: 13,
-          lineHeight: 1.5,
-          cursorBlink: true,
-          cursorStyle: 'block',
-          scrollback: 5000,
-          convertEol: true,
-          allowTransparency: true,
-        });
+      // Ctrl+L — clear
+      if (e.ctrlKey && e.key === 'l') {
+        e.preventDefault();
+        sess.lines = [];
+        refresh();
+        return;
+      }
 
-        const fitAddon = new FitAddonCtor();
-        fitAddon.activate(term);
+      // Enter — submit
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cmd = sess.lineBuffer.trim();
 
-        containerRef.current.innerHTML = '';
-        term.open(containerRef.current);
-        fitAddon.fit();
-        term.focus();
+        // Echo the command
+        sess.lines.push(...makeLines(`\x1b[32m$\x1b[0m ${sess.lineBuffer}`));
+        const prevBuffer = sess.lineBuffer;
+        sess.lineBuffer = '';
+        sess.historyIdx = -1;
+        setDangerWarning('');
+        refresh();
 
-        if (!mounted) return;
-        term.writeln('\x1b[38;5;10m  ██╗   ██╗███████╗██╗████████╗ ██████╗ ██████╗ ███████╗\x1b[0m');
-        term.writeln('\x1b[38;5;10m  ╚██╗ ██╔╝██╔════╝██║╚══██╔══╝██╔═══██╗██╔══██╗██╔════╝\x1b[0m');
-        term.writeln('\x1b[38;5;10m   ╚████╔╝ █████╗  ██║   ██║   ██║   ██║██████╔╝███████╗\x1b[0m');
-        term.writeln('\x1b[38;5;10m    ╚██╔╝  ██╔══╝  ██║   ██║   ██║   ██║██╔═══╝ ╚════██║\x1b[0m');
-        term.writeln('\x1b[38;5;10m     ██║   ██║     ██║   ██║   ╚██████╔╝██║     ███████║\x1b[0m');
-        term.writeln('\x1b[38;5;10m     ╚═╝   ╚═╝     ╚═╝   ╚═╝    ╚═════╝ ╚═╝     ╚══════╝\x1b[0m');
-        term.writeln('');
-        if (isWebContainerReady()) {
-          term.writeln('  \x1b[32m✓ WebContainer ready\x1b[0m — Real sandboxed shell. Type commands and press Enter.');
-        } else {
-          term.writeln('  \x1b[33m⚠ WebContainer initializing\x1b[0m — Commands will run once boot completes.');
-        }
-        term.writeln('  \x1b[90mTip: ↑/↓ arrows for history · Ctrl+C to kill · Ctrl+L to clear\x1b[0m');
-        term.writeln('');
-        term.write('\x1b[32m$\x1b[0m ');
-
-        // Create session object with history support
-        const sess: XtermSession = {
-          terminal: term,
-          fitAddon,
-          history: [],
-          historyIdx: -1,
-          lineBuffer: '',
-        };
-        xtermSessions.set(activeTerminalId!, sess);
-
-        // ── Input handler ─────────────────────────────────────
-        term.onData((data: string) => {
-          const code = data.charCodeAt(0);
-
-          // Ctrl+C → SIGINT
-          if (code === 3) {
-            if (sess.stdin) {
-              void sess.stdin.write('\x03').catch(() => undefined);
-            }
-            term.write('^C\r\n');
-            sess.lineBuffer = '';
-            sess.historyIdx = -1;
-            setDangerWarning('');
-            term.write('\x1b[32m$\x1b[0m ');
-            return;
+        if (cmd) {
+          // Add to history (avoid consecutive duplicates)
+          if (sess.history.length === 0 || sess.history[sess.history.length - 1] !== cmd) {
+            sess.history.push(cmd);
+            if (sess.history.length > 100) sess.history.shift();
           }
 
-          // Ctrl+D → EOF
-          if (code === 4) {
-            if (sess.stdin) void sess.stdin.write('\x04').catch(() => undefined);
-            return;
-          }
-
-          // Ctrl+L → clear
-          if (code === 12) {
-            term.clear();
-            term.write('\x1b[32m$\x1b[0m ' + sess.lineBuffer);
-            return;
-          }
-
-          // If a process is running, forward raw input
+          // If a process is running, send to stdin
           if (sess.stdin) {
-            void sess.stdin.write(data).catch(() => undefined);
-            return;
+            void sess.stdin.write(prevBuffer + '\n').catch(() => undefined);
+          } else {
+            void runCommand(cmd, activeTerminalId);
           }
-
-          // ── Arrow keys (history navigation) ────────────────
-          if (data === '\x1b[A') {
-            // Up arrow — older command
-            if (sess.history.length === 0) return;
-            if (sess.historyIdx === -1) {
-              sess.historyIdx = sess.history.length - 1;
-            } else if (sess.historyIdx > 0) {
-              sess.historyIdx--;
-            }
-            const entry = sess.history[sess.historyIdx] ?? '';
-            // Clear current line and rewrite
-            term.write('\x1b[2K\r\x1b[32m$\x1b[0m ' + entry);
-            sess.lineBuffer = entry;
-            setDangerWarning(isDangerousCommand(entry) ? entry : '');
-            return;
-          }
-
-          if (data === '\x1b[B') {
-            // Down arrow — newer command
-            if (sess.historyIdx === -1) return;
-            if (sess.historyIdx < sess.history.length - 1) {
-              sess.historyIdx++;
-              const entry = sess.history[sess.historyIdx] ?? '';
-              term.write('\x1b[2K\r\x1b[32m$\x1b[0m ' + entry);
-              sess.lineBuffer = entry;
-              setDangerWarning(isDangerousCommand(entry) ? entry : '');
-            } else {
-              // Past the end — clear line
-              sess.historyIdx = -1;
-              term.write('\x1b[2K\r\x1b[32m$\x1b[0m ');
-              sess.lineBuffer = '';
-              setDangerWarning('');
-            }
-            return;
-          }
-
-          // Left/Right arrows — ignore (no cursor movement in raw mode)
-          if (data === '\x1b[C' || data === '\x1b[D') return;
-
-          // Enter — submit command
-          if (data === '\r') {
-            term.write('\r\n');
-            const cmd = sess.lineBuffer.trim();
-            sess.lineBuffer = '';
-            sess.historyIdx = -1;
-            setDangerWarning('');
-
-            if (cmd) {
-              // Add to history (newest last), cap at 100
-              if (sess.history.length === 0 || sess.history[sess.history.length - 1] !== cmd) {
-                sess.history.push(cmd);
-                if (sess.history.length > 100) sess.history.shift();
-              }
-              void runXtermCommand(cmd, sess, term, activeTerminalId!);
-            } else {
-              term.write('\x1b[32m$\x1b[0m ');
-            }
-            return;
-          }
-
-          // Backspace
-          if (data === '\x7f' || data === '\b') {
-            if (sess.lineBuffer.length > 0) {
-              sess.lineBuffer = sess.lineBuffer.slice(0, -1);
-              term.write('\b \b');
-              setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
-            }
-            return;
-          }
-
-          // Printable character
-          if (code >= 32) {
-            sess.lineBuffer += data;
-            term.write(data);
-            setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
-          }
-        });
-
-        setXtermReady(true);
-      } catch (err) {
-        console.error('[TerminalPanel] Failed to load xterm:', err);
-        setLoadError('Failed to load terminal. Check your internet connection.');
-        setXtermReady(false);
-      }
-    }
-
-    void initXterm();
-
-    return () => {
-      mounted = false;
-    };
-  }, [activeTerminalId, runXtermCommand]);
-
-  // ── ResizeObserver ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!panelRef.current) return;
-    const obs = new ResizeObserver(() => {
-      if (activeTerminalId) {
-        const sess = xtermSessions.get(activeTerminalId);
-        if (sess) {
-          try { sess.fitAddon.fit(); } catch { /* ignore */ }
         }
+        return;
       }
-    });
-    obs.observe(panelRef.current);
-    return () => obs.disconnect();
-  }, [activeTerminalId]);
 
-  // ── Dispose session ───────────────────────────────────────────────────────
-  function disposeXtermSession(id: string) {
-    const sess = xtermSessions.get(id);
-    if (sess) {
-      try { sess.terminal.dispose(); } catch { /* ignore */ }
-      try { sess.fitAddon.dispose(); } catch { /* ignore */ }
-      if (sess.killProcess) sess.killProcess();
-      xtermSessions.delete(id);
-    }
-  }
+      // Arrow Up — older history
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (sess.history.length === 0) return;
+        if (sess.historyIdx === -1) {
+          sess.historyIdx = sess.history.length - 1;
+        } else if (sess.historyIdx > 0) {
+          sess.historyIdx--;
+        }
+        sess.lineBuffer = sess.history[sess.historyIdx] ?? '';
+        setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
+        refresh();
+        return;
+      }
+
+      // Arrow Down — newer history
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (sess.historyIdx === -1) return;
+        if (sess.historyIdx < sess.history.length - 1) {
+          sess.historyIdx++;
+          sess.lineBuffer = sess.history[sess.historyIdx] ?? '';
+        } else {
+          sess.historyIdx = -1;
+          sess.lineBuffer = '';
+        }
+        setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
+        refresh();
+        return;
+      }
+
+      // Backspace
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        sess.lineBuffer = sess.lineBuffer.slice(0, -1);
+        setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
+        refresh();
+        return;
+      }
+    },
+    [activeTerminalId, runCommand, refresh]
+  );
+
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!activeTerminalId) return;
+      const sess = getOrCreateSession(activeTerminalId);
+
+      // If a process is running, pipe to stdin
+      if (sess.stdin) {
+        void sess.stdin.write(e.target.value.slice(-1)).catch(() => undefined);
+        return;
+      }
+
+      sess.lineBuffer = e.target.value;
+      setDangerWarning(isDangerousCommand(sess.lineBuffer) ? sess.lineBuffer : '');
+      refresh();
+
+      // Keep input in sync by resetting value
+      e.target.value = sess.lineBuffer;
+    },
+    [activeTerminalId, refresh]
+  );
 
   // ── Tab management ────────────────────────────────────────────────────────
   const newSession = useCallback(() => {
@@ -465,146 +512,167 @@ export function TerminalPanel() {
     toast.success('New terminal session');
   }, [createTerminalSession]);
 
-  const closeSession = useCallback((id: string) => {
-    disposeXtermSession(id);
-    removeTerminalSession(id);
-  }, [removeTerminalSession]);
+  const closeSession = useCallback(
+    (id: string) => {
+      const sess = sessions.get(id);
+      if (sess?.killProcess) sess.killProcess();
+      sessions.delete(id);
+      removeTerminalSession(id);
+    },
+    [removeTerminalSession]
+  );
 
   const clearTerminal = useCallback(() => {
     if (!activeTerminalId) return;
-    const sess = xtermSessions.get(activeTerminalId);
-    if (sess) sess.terminal.clear();
-  }, [activeTerminalId]);
+    const sess = sessions.get(activeTerminalId);
+    if (sess) {
+      sess.lines = [];
+      refresh();
+    }
+  }, [activeTerminalId, refresh]);
 
-  const sessions = Object.values(terminalSessions);
+  // Focus the hidden input to capture keyboard events
+  const focusInput = useCallback(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // ── Current session data ──────────────────────────────────────────────────
+  const activeSess = activeTerminalId ? getOrCreateSession(activeTerminalId) : null;
+  const allSessions = Object.values(terminalSessions);
+  const wcReady = isWebContainerReady();
 
   return (
-    <div
-      ref={panelRef}
-      className="flex flex-col h-full"
-      style={{ background: 'var(--bg-void)', borderTop: '1px solid var(--border-subtle)' }}
-      role="region"
-      aria-label="Terminal"
-    >
-      {/* Tab bar */}
+    <>
+      {/* Blink keyframe injected once */}
+      <style>{`@keyframes term-blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
+
       <div
-        className="flex items-center border-b flex-shrink-0"
-        style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-void)', height: 36 }}
-        role="tablist"
-        aria-label="Terminal sessions"
+        className="flex flex-col h-full"
+        style={{ background: 'var(--bg-void)', borderTop: '1px solid var(--border-subtle)' }}
+        role="region"
+        aria-label="Terminal"
       >
-        {sessions.map((session) => (
-          <TerminalTab
-            key={session.id}
-            sessionId={session.id}
-            isActive={session.id === activeTerminalId}
-            title={session.title}
-            isRunning={session.isRunning}
-            onActivate={() => setActiveTerminal(session.id)}
-            onClose={() => closeSession(session.id)}
-          />
-        ))}
-
-        <button
-          className="flex items-center justify-center w-8 h-8 ml-1 rounded transition-all hover:opacity-80"
-          style={{ color: 'var(--text-muted)' }}
-          onClick={newSession}
-          aria-label="New terminal session"
-          title="New Terminal"
+        {/* Tab bar */}
+        <div
+          className="flex items-center border-b flex-shrink-0"
+          style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-void)', height: 36 }}
+          role="tablist"
+          aria-label="Terminal sessions"
         >
-          <Plus size={13} />
-        </button>
+          {allSessions.map((session) => (
+            <TerminalTabEl
+              key={session.id}
+              sessionId={session.id}
+              isActive={session.id === activeTerminalId}
+              title={sessions.get(session.id)?.isRunning ? 'bash (running)' : 'bash'}
+              isRunning={sessions.get(session.id)?.isRunning ?? false}
+              onActivate={() => setActiveTerminal(session.id)}
+              onClose={() => closeSession(session.id)}
+            />
+          ))}
 
-        <div className="flex-1" />
-
-        <div className="flex items-center gap-2 pr-2">
           <button
-            className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
-            style={{ color: 'var(--text-muted)' }}
-            onClick={clearTerminal}
-            aria-label="Clear terminal"
-            title="Clear (Ctrl+L)"
+            className="flex items-center justify-center w-8 h-8 ml-1 rounded transition-all"
+            style={{ color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+            onClick={newSession}
+            aria-label="New terminal session"
+            title="New Terminal"
           >
-            <Trash2 size={12} />
+            <Plus size={13} />
           </button>
 
-          <div
-            className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs"
-            style={{
-              background: isWebContainerReady() ? 'rgba(0,245,160,0.06)' : 'rgba(255,77,109,0.06)',
-              border: `1px solid ${isWebContainerReady() ? 'rgba(0,245,160,0.2)' : 'rgba(255,77,109,0.2)'}`,
-              color: isWebContainerReady() ? 'var(--success)' : 'var(--danger)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-            }}
-            aria-live="polite"
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: isWebContainerReady() ? 'var(--success)' : 'var(--danger)' }}
-              aria-hidden="true"
-            />
-            {isWebContainerReady() ? 'Connected' : 'Initializing…'}
-          </div>
-        </div>
-      </div>
+          <div className="flex-1" />
 
-      {/* xterm container */}
-      <div
-        className="flex-1 overflow-hidden relative"
-        style={{ background: 'var(--bg-void)' }}
-        onClick={() => {
-          const sess = activeTerminalId ? xtermSessions.get(activeTerminalId) : undefined;
-          if (sess) sess.terminal.focus();
-        }}
-      >
-        <div
-          ref={containerRef}
-          className="absolute inset-0"
-          style={{ padding: '8px 4px' }}
-          role="region"
-          aria-label="Terminal output"
-        />
+          <div className="flex items-center gap-2 pr-2">
+            <button
+              className="flex items-center justify-center w-7 h-7 rounded transition-all"
+              style={{ color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+              onClick={clearTerminal}
+              aria-label="Clear terminal"
+              title="Clear (Ctrl+L)"
+            >
+              <Trash2 size={12} />
+            </button>
 
-        {!xtermReady && !loadError && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'var(--bg-void)' }}>
-            <div className="text-center">
-              <div
-                className="w-5 h-5 rounded-full border-2 border-t-transparent animate-spin mx-auto mb-2"
-                style={{ borderColor: 'var(--accent-400)' }}
+            <div
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded text-xs"
+              style={{
+                background: wcReady ? 'rgba(0,245,160,0.06)' : 'rgba(255,77,109,0.06)',
+                border: `1px solid ${wcReady ? 'rgba(0,245,160,0.2)' : 'rgba(255,77,109,0.2)'}`,
+                color: wcReady ? 'var(--success)' : 'var(--danger)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10,
+              }}
+              aria-live="polite"
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ background: wcReady ? '#00F5A0' : '#FF4D6D', display: 'inline-block' }}
                 aria-hidden="true"
               />
-              <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                Loading terminal…
-              </p>
+              {wcReady ? 'Connected' : 'Initializing…'}
             </div>
           </div>
-        )}
+        </div>
 
-        {loadError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4" style={{ background: 'var(--bg-void)' }}>
-            <AlertTriangle size={20} style={{ color: 'var(--danger)' }} className="mb-2" aria-hidden="true" />
-            <p className="text-xs text-center" style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>
-              {loadError}
-            </p>
-            <p className="text-xs text-center mt-1" style={{ color: 'var(--text-muted)' }}>
-              Terminal requires internet access to load the xterm.js library.
-            </p>
+        {/* Output area — click to focus input */}
+        <div
+          ref={outputRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden"
+          style={{ background: 'var(--bg-void)', cursor: 'text' }}
+          onClick={focusInput}
+          aria-label="Click to focus terminal input"
+        >
+          {activeSess && (
+            <TerminalOutput
+              lines={activeSess.lines}
+              lineBuffer={activeSess.lineBuffer}
+              showCursor={focused}
+            />
+          )}
+        </div>
+
+        {/* Hidden input — captures keystrokes */}
+        <input
+          ref={inputRef}
+          type="text"
+          value={activeSess?.lineBuffer ?? ''}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            position: 'absolute',
+            left: -9999,
+            top: -9999,
+            width: 1,
+            height: 1,
+            opacity: 0,
+            pointerEvents: 'none',
+          }}
+          aria-hidden="true"
+          tabIndex={-1}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+        />
+
+        {/* Danger warning */}
+        {dangerWarning && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 border-t text-xs flex-shrink-0"
+            style={{
+              borderColor: 'rgba(255,77,109,0.2)',
+              background: 'rgba(255,77,109,0.06)',
+              color: 'var(--danger)',
+            }}
+            role="alert"
+          >
+            <AlertTriangle size={11} aria-hidden="true" />
+            <span>Dangerous command detected — blocked unless Full-Auto mode is active</span>
           </div>
         )}
       </div>
-
-      {/* Dangerous command warning */}
-      {dangerWarning && (
-        <div
-          className="flex items-center gap-2 px-3 py-1.5 border-t text-xs flex-shrink-0"
-          style={{ borderColor: 'rgba(255,77,109,0.2)', background: 'rgba(255,77,109,0.06)', color: 'var(--danger)' }}
-          role="alert"
-        >
-          <AlertTriangle size={11} aria-hidden="true" />
-          <span>Dangerous command detected — will be blocked unless Full-Auto mode is active</span>
-        </div>
-      )}
-    </div>
+    </>
   );
 }

@@ -5,6 +5,30 @@
 
 ---
 
+## Hotfix — Pure React Terminal (No External Packages)
+
+**Problem:** `@xterm/xterm` and `@xterm/addon-fit` are not installed in the project. CDN imports via `esm.sh` fail in the cross-origin-isolated iframe environment with:
+- `NS_ERROR_CORRUPTED_CONTENT` (CORS failure)
+- `Loading module was blocked because of a disallowed MIME type ("text/plain")`
+- The CSP headers from COOP/COEP block external module scripts
+
+**Solution:** Replaced the entire `TerminalPanel.tsx` with a **pure React terminal emulator** — zero external dependencies:
+- ANSI color parsing via regex + CSS span mapping (supports 30-37, 90-97, 40-47 color codes)
+- Multi-tab support via `Map<sessionId, TermSession>` (module-level, survives re-renders)
+- Command history: per-session `history[]` + `historyIdx`, capped at 100, oldest-first
+- Arrow Up/Down navigates history; clears line correctly
+- Hidden `<input>` captures keystrokes, `outputRef` div renders output lines
+- Ctrl+C → writes `\x03` to stdin; Ctrl+D → `\x04`; Ctrl+L → clears lines array
+- WebContainer stdin/stdout: `spawn()` output piped to `appendOutput()`, input forwarded on Enter
+- Dangerous command detection still works (red warning banner)
+- ResizeObserver not needed (CSS `overflow-y: auto` handles scroll naturally)
+- Auto-scroll: `useLayoutEffect` scrolls `outputRef` to bottom after every render
+- ANSI welcome banner with YFitOps branding
+
+**vite.config.ts updated:** Added `exclude: ["@xterm/xterm", "@xterm/addon-fit"]` to `optimizeDeps` to prevent Vite pre-bundler from attempting to resolve these absent packages.
+
+---
+
 ## What Was Built
 
 ### 1. xterm Terminal — CDN Import Kept (With Fix)

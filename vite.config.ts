@@ -22,6 +22,8 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ["@monaco-editor/react"],
+    // xterm is NOT installed — exclude to prevent pre-bundle errors
+    exclude: ["@xterm/xterm", "@xterm/addon-fit"],
   },
   build: {
     rollupOptions: {

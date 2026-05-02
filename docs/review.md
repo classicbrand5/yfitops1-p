@@ -23,8 +23,16 @@
 
 ## ✅ Fixed in Phase 10
 
-### 1. xterm.js Terminal (Real Integration) — ✅ FIXED
-**Resolution:** `TerminalPanel.tsx` completely rewritten. Real `@xterm/xterm@5.3.0` Terminal loaded from `esm.sh` CDN via dynamic `import()` (no package.json change needed). `@xterm/addon-fit@0.8.0` also from esm.sh. CSS injected via dynamic `<link>` tag. Multi-tab support via `Map<sessionId, XtermSession>`. WebContainer process stdout piped to `term.write()`. `term.onData()` sends keystrokes to process stdin. Ctrl+C → `\x03`, Ctrl+D → `\x04`, Ctrl+L → `term.clear()`. ResizeObserver triggers `fitAddon.fit()` on container resize. ASCII art welcome banner with ANSI colors.
+### 1. xterm.js Terminal (Real Integration) — ✅ FIXED (Hotfix)
+**Resolution:** `TerminalPanel.tsx` completely rewritten as a **pure React terminal emulator** with zero external dependencies. Previous attempts used `esm.sh` CDN which failed due to CORS/MIME issues in the cross-origin-isolated iframe. The new implementation:
+- ANSI color rendering via CSS spans (parseAnsi function)
+- Hidden `<input>` captures keystrokes; visible output `<div>` renders lines
+- Per-session `TermSession` objects stored in a module-level `Map`
+- Command history (↑/↓), Ctrl+C/D/L, dangerous command blocking
+- WebContainer process stdin/stdout wired via `spawn()` from `@/core/webcontainer/process`
+- Auto-scrolls via `useLayoutEffect`
+- No CDN imports, no `@xterm/xterm` dependency needed
+- `vite.config.ts` excludes `@xterm/xterm` and `@xterm/addon-fit` from pre-bundling
 
 ### 2. Monaco Model Cache Disposal — ✅ FIXED
 **Resolution:** `closeTab()` action in `useAppStore.ts` now accesses `window.monaco` (registered globally by `@monaco-editor/react` on mount), retrieves the model via `editor.getModel(Uri.file(path))` and calls `.dispose()`. Wrapped in try/catch for safety when Monaco hasn't loaded yet. Logged as `[Monaco] Disposed model for <path>`.
