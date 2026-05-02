@@ -7,7 +7,7 @@ import { executeActions } from '@/core/agent/agentExecutor';
 import { useAppStore } from '@/store/useAppStore';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import { toast } from 'sonner';
-import type { ConversationMessage } from '@/types/agent.types';
+import type { ConversationMessage, AgentAction } from '@/types/agent.types';
 
 interface AgentMessageProps {
   message: ConversationMessage;

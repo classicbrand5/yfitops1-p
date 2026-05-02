@@ -1,5 +1,5 @@
 // src/App.tsx — Route definitions + auth guard
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -11,14 +11,14 @@ import NotFound from './pages/NotFound';
 import { WorkspaceErrorBoundary } from '@/components/layout/WorkspaceErrorBoundary';
 
 // Lazy-loaded pages for code splitting
-const Landing    = React.lazy(() => import('./pages/Landing'));
-const Auth       = React.lazy(() => import('./pages/Auth'));
-const WorkspacePage = React.lazy(() => import('./pages/WorkspacePage'));
-const Dashboard  = React.lazy(() => import('./pages/Dashboard'));
-const Analytics  = React.lazy(() => import('./pages/Analytics'));
-const BuildMonitor = React.lazy(() => import('./pages/BuildMonitor'));
-const Settings   = React.lazy(() => import('./pages/Settings'));
-const Billing    = React.lazy(() => import('./pages/Billing'));
+const Landing    = lazy(() => import('./pages/Landing'));
+const Auth       = lazy(() => import('./pages/Auth'));
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage'));
+const Dashboard  = lazy(() => import('./pages/Dashboard'));
+const Analytics  = lazy(() => import('./pages/Analytics'));
+const BuildMonitor = lazy(() => import('./pages/BuildMonitor'));
+const Settings   = lazy(() => import('./pages/Settings'));
+const Billing    = lazy(() => import('./pages/Billing'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
