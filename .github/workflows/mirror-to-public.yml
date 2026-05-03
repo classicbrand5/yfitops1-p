@@ -1,0 +1,20 @@
+name: Mirror to public repo
+
+on:
+  push:
+    branches: [main]   # or whatever your default branch is
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private repo (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to public mirror
+        run: |
+          git remote add public https://x-access-token:${{ secrets.DEPLOY_KEY }}@github.com/classicbrand5/yfitops1-p.git
+          git push public --force --all
+          git push public --force --tags
