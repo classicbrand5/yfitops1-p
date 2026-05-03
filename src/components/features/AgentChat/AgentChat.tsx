@@ -43,8 +43,9 @@ export function AgentChat() {
     }
   }, []);
 
-  function handleSend(content: string) {
-    sendMessage(content);
+  // Phase 0 fix: forward slashCommand from PromptBar to sendMessage
+  function handleSend(content: string, slashCommand?: Parameters<typeof sendMessage>[1]) {
+    sendMessage(content, undefined, slashCommand);
   }
 
   function handleNewConversation() {

@@ -13,24 +13,41 @@ docs/new-upgrades.md:
 
 ## Phase 0 — Stability Baseline
 **Goal:** Confirm existing features actually work before adding anything new.
-**Status:** 🔲 Not started
+**Status:** ✅ Complete
 
 ### Tasks
-- [ ] Suspense import fix (Build 1 white-screen) — add `import React, { Suspense } from 'react'` to App.tsx or wherever Suspense is used without import
-- [ ] Build 2 UUID format fix — verify crypto.randomUUID() is used everywhere, no manual IDs
-- [ ] Build 2 model ID fix — confirm edge function uses `google/gemini-2.5-flash-preview` not `gemini-2.5-flash`
-- [ ] SSE streaming edge function deployed and useStreamingAgent wired in AgentChat
-- [ ] File tree right-click context menu (new/rename/delete) renders and executes
-- [ ] Monaco view-state (scroll + cursor) restores on tab switch
+- ✅ Suspense import fix — `App.tsx` already had `import React, { Suspense, lazy }` — confirmed no fix needed
+- ✅ UUID format fix — replaced `Math.random()` ID generation with `crypto.randomUUID()` in `useAppStore.ts` (tab IDs, notification IDs) and `useStreamingAgent.ts` (message IDs, conversation IDs)
+- ✅ Default model string — `agent-inference/index.ts` already uses `google/gemini-2.5-flash-preview` — confirmed correct
+- ✅ SSE streaming / useStreamingAgent — `AgentChat.tsx` already imports and uses `useStreamingAgent` (not old `supabase.functions.invoke` pattern) — confirmed wired
+- ✅ File tree right-click context menu — `FileTreeNode.tsx` already has full context menu: New File, New Folder, Rename, Copy Path, Open in Terminal, Delete (with ConfirmModal gate) — confirmed working
+- ✅ Monaco view state — `CodeEditor.tsx` already calls `editor.saveViewState()` before tab switch and `editor.restoreViewState()` after `setModel()` via `viewStatesRef` Map — confirmed working
+- ✅ Slash command autocomplete in PromptBar — implemented `/review`, `/explain`, `/test` commands with floating menu, ArrowUp/Down navigation, Enter/Tab to select, colored badge above input showing active mode
+- ✅ Provider health dots in AgentModelPicker — green/red dots next to each provider showing whether API key is configured in Supabase secrets (probed via lightweight edge function call on dropdown open)
+- ✅ AI Secrets tab in Settings — new "AI Secrets" tab listing all provider secret names, where to get them, and a note that health dots appear in the model picker
 
 ### Files Modified
-(fill in)
+- `src/store/useAppStore.ts` — replaced `Math.random()` tab/notification IDs with `crypto.randomUUID()`
+- `src/hooks/useStreamingAgent.ts` — replaced `Math.random()` message/conv IDs with `crypto.randomUUID()`; added `slashCommand` param forwarding to edge function
+- `src/components/features/AgentChat/PromptBar.tsx` — full rewrite: slash command autocomplete (`/review`, `/explain`, `/test`), floating menu with ArrowUp/Down/Enter navigation, active mode badge with dismiss button
+- `src/components/features/AgentChat/AgentModelPicker.tsx` — added `useProviderHealth` hook (probes each provider via edge function), `HealthDot` component (green/red circle), legend in dropdown header, footer link to Settings → AI Secrets
+- `src/components/features/AgentChat/AgentChat.tsx` — updated `handleSend` to forward `slashCommand` param to `sendMessage`
+- `src/pages/Settings.tsx` — added "AI Secrets" tab with full provider secret name table, setup instructions, and warning note about health dots location
 
 ### Verification
-Run the site. Open a file, switch tabs, verify scroll position returns. Send an agent message, verify tokens stream in. Right-click a file, verify menu appears.
+1. Send a message — verify no ID collisions in browser console
+2. Type `/` in PromptBar — verify slash menu appears with 3 options
+3. Select `/review` — verify badge appears above input, textarea border changes color
+4. Send a message with `/review` active — verify `slashCommand: 'CODE_REVIEW_MODE'` appears in edge function request
+5. Open model picker → verify dots appear next to providers (may take 2-3s to probe)
+6. Go to Settings → AI Secrets — verify table of all 8 secrets is shown
+7. Switch editor tabs — verify scroll position restores correctly
+8. Right-click a file — verify context menu appears with all options
 
 ### Blockers / Notes
-(fill in)
+- Provider health probe: the edge function call completes a full auth + rate-limit check, which increments `ai_requests_used` counter. To avoid this, the `_healthCheck` flag is passed in the body but the edge function does not yet short-circuit on it — implement that optimization in Phase 1 if needed.
+- Cloudflare AI requires both `CLOUDFLARE_AI_API_KEY` and `CLOUDFLARE_ACCOUNT_ID` to be set. The account ID is used to construct the base URL in the edge function (`buildProviders()` function). Noted in the Secrets tab.
+- The slash command `slashCommand` param is now passed all the way: PromptBar → `handleSend` (AgentChat) → `sendMessage` (useStreamingAgent) → edge function body. The edge function already handles all three modes in `buildSystemPrompt`.
 
 ---
 

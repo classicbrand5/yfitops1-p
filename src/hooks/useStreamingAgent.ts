@@ -16,12 +16,13 @@ import { executeActions } from '@/core/agent/agentExecutor';
 import type { ConversationMessage, AgentAction, ActionResult } from '@/types/agent.types';
 
 // ── Helpers ───────────────────────────────────────────────────
+// Phase 0 fix: use crypto.randomUUID() for collision-free IDs
 function generateId(): string {
-  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  return `msg-${crypto.randomUUID()}`;
 }
 
 function generateConvId(): string {
-  return `conv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  return `conv-${crypto.randomUUID()}`;
 }
 
 // Strip the JSON wrapper that some providers emit when response_format:json_object
@@ -182,8 +183,9 @@ export function useStreamingAgent() {
   }
 
   // ── sendMessage ───────────────────────────────────────────
+  // Phase 0 fix: accept optional slashCommand forwarded from PromptBar
   const sendMessage = useCallback(
-    async (content: string, convId?: string) => {
+    async (content: string, convId?: string, slashCommand?: 'CODE_REVIEW_MODE' | 'EXPLAIN_MODE' | 'TEST_MODE') => {
       if (!user) {
         toast.error('Not signed in', {
           description: 'Please sign in to use the AI agent.',
@@ -279,6 +281,7 @@ export function useStreamingAgent() {
               provider: selectedProvider,
               model: selectedModel,
               stream: true,
+              ...(slashCommand ? { slashCommand } : {}), // Phase 0 fix: forward slash command to edge function
             }),
           },
         );

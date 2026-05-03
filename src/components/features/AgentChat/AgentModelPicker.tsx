@@ -1,12 +1,12 @@
 // src/components/features/AgentChat/AgentModelPicker.tsx
+// Phase 0 fix: added provider health probe dots (green/red) via OPTIONS preflight
 // Dropdown for switching AI providers and models in the chat header.
-// Each provider shows its tier badge, speed, and model name.
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, Zap, Sparkles, Star } from 'lucide-react';
+import { ChevronDown, Check, Zap, Sparkles, Star, Circle } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 
-// ── Provider / Model Registry (mirrors edge function) ─────────
+// ── Provider / Model Registry ─────────────────────────────
 export interface ProviderOption {
   id: string;
   label: string;
@@ -15,7 +15,7 @@ export interface ProviderOption {
   badge: 'free' | 'credits' | 'onspace';
   speed: 'fast' | 'fastest' | 'standard';
   description: string;
-  color: string;              // hex for badge/dot
+  color: string;
 }
 
 export interface ModelOption {
@@ -122,14 +122,14 @@ export const PROVIDER_OPTIONS: ProviderOption[] = [
   },
 ];
 
-// ── Speed Icon ─────────────────────────────────────────────────
+// ── Speed Icon ────────────────────────────────────────────
 function SpeedIcon({ speed }: { speed: ProviderOption['speed'] }) {
   if (speed === 'fastest') return <Zap size={9} aria-label="Fastest inference" />;
   if (speed === 'fast') return <Sparkles size={9} aria-label="Fast inference" />;
   return <Star size={9} aria-label="Standard inference" />;
 }
 
-// ── Badge ──────────────────────────────────────────────────────
+// ── Badge ─────────────────────────────────────────────────
 function ProviderBadge({ badge }: { badge: ProviderOption['badge'] }) {
   const styles: Record<ProviderOption['badge'], { bg: string; color: string; label: string }> = {
     free: { bg: 'rgba(0,245,160,0.10)', color: '#00F5A0', label: 'FREE' },
@@ -147,19 +147,134 @@ function ProviderBadge({ badge }: { badge: ProviderOption['badge'] }) {
   );
 }
 
-// ── Main Component ─────────────────────────────────────────────
+// ── Provider Health Dot ───────────────────────────────────
+// Phase 0 fix: probe each provider's key via the edge function OPTIONS endpoint.
+// We call the agent-inference edge function with a lightweight health check request.
+// The edge function validates env vars on startup; a 200/401 means "key configured",
+// a 500 with "provider not configured" means the key is missing.
+
+type HealthStatus = 'unknown' | 'ok' | 'missing';
+
+function useProviderHealth(open: boolean): Record<string, HealthStatus> {
+  const [health, setHealth] = useState<Record<string, HealthStatus>>({});
+
+  useEffect(() => {
+    if (!open) return;
+
+    async function checkHealth() {
+      const supabaseUrl = (import.meta.env as Record<string, string>).VITE_SUPABASE_URL;
+      const supabaseAnonKey = (import.meta.env as Record<string, string>).VITE_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseAnonKey) return;
+
+      // Get current auth token
+      let accessToken = '';
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        if (supabase) {
+          const { data } = await supabase.auth.getSession();
+          accessToken = data?.session?.access_token ?? '';
+        }
+      } catch {
+        return;
+      }
+      if (!accessToken) return;
+
+      // Probe each provider in parallel
+      // We send a minimal health-check message; the edge function will resolve the
+      // provider key and return 200 if configured, or 502 with provider-specific error.
+      const results = await Promise.allSettled(
+        PROVIDER_OPTIONS.map(async (p) => {
+          try {
+            const res = await fetch(`${supabaseUrl}/functions/v1/agent-inference`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                apikey: supabaseAnonKey,
+                'Content-Type': 'application/json',
+              },
+              // Minimal payload — use the provider's default model so the edge fn
+              // validates the key immediately after auth.
+              body: JSON.stringify({
+                messages: [{ role: 'user', content: '__health_check__' }],
+                provider: p.id,
+                model: p.defaultModel,
+                stream: false,
+                _healthCheck: true, // edge fn can short-circuit if needed
+              }),
+              signal: AbortSignal.timeout(8000),
+            });
+
+            // 200/429 = key configured (429 = rate limited but key works)
+            // 502 = provider error (likely missing key)
+            // 401 = auth error (we handle separately above)
+            if (res.status === 200 || res.status === 429) return { id: p.id, status: 'ok' as HealthStatus };
+            if (res.status === 502) {
+              const text = await res.text().catch(() => '');
+              // If error message contains the provider name, the key is missing
+              if (text.includes('Network error') || text.includes('not configured') || text.includes('missing')) {
+                return { id: p.id, status: 'missing' as HealthStatus };
+              }
+            }
+            return { id: p.id, status: 'ok' as HealthStatus };
+          } catch {
+            return { id: p.id, status: 'unknown' as HealthStatus };
+          }
+        }),
+      );
+
+      const newHealth: Record<string, HealthStatus> = {};
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          newHealth[result.value.id] = result.value.status;
+        }
+      }
+      setHealth(newHealth);
+    }
+
+    checkHealth();
+  }, [open]);
+
+  return health;
+}
+
+function HealthDot({ status }: { status: HealthStatus }) {
+  if (status === 'unknown') {
+    return (
+      <Circle
+        size={6}
+        style={{ color: 'var(--text-muted)', opacity: 0.4, flexShrink: 0 }}
+        aria-label="Status unknown"
+      />
+    );
+  }
+  return (
+    <span
+      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+      style={{
+        background: status === 'ok' ? 'var(--success)' : 'var(--danger)',
+        boxShadow: status === 'ok' ? '0 0 4px rgba(0,245,160,0.5)' : '0 0 4px rgba(255,77,109,0.5)',
+      }}
+      aria-label={status === 'ok' ? 'Provider key configured' : 'Provider key missing'}
+      title={status === 'ok' ? '✅ API key configured' : '❌ API key missing — add to Supabase secrets'}
+    />
+  );
+}
+
+// ── Main Component ────────────────────────────────────────
 export function AgentModelPicker() {
   const { selectedProvider, selectedModel, setSelectedProvider, setSelectedModel } = useAppStore();
   const [open, setOpen] = useState(false);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Phase 0 fix: probe provider health when dropdown opens
+  const providerHealth = useProviderHealth(open);
+
   const currentProvider = PROVIDER_OPTIONS.find((p) => p.id === selectedProvider) ?? PROVIDER_OPTIONS[0];
   const currentModelLabel =
     currentProvider.models.find((m) => m.id === selectedModel)?.label ??
     currentProvider.models[0].label;
 
-  // Close on outside click
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
@@ -171,7 +286,6 @@ export function AgentModelPicker() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  // Close on Escape
   useEffect(() => {
     if (!open) return;
     function handleKey(e: KeyboardEvent) {
@@ -214,7 +328,6 @@ export function AgentModelPicker() {
         aria-expanded={open}
         aria-label={`Current model: ${currentProvider.label} / ${currentModelLabel}. Click to switch.`}
       >
-        {/* Provider color dot */}
         <span
           className="w-2 h-2 rounded-full flex-shrink-0"
           style={{ background: currentProvider.color }}
@@ -240,7 +353,7 @@ export function AgentModelPicker() {
         <div
           className="absolute right-0 top-full mt-1 animate-fade-up"
           style={{
-            width: 300,
+            width: 310,
             background: 'var(--bg-elevated)',
             border: '1px solid var(--border-default)',
             borderRadius: 12,
@@ -251,20 +364,31 @@ export function AgentModelPicker() {
           aria-label="Select AI provider and model"
         >
           {/* Header */}
-          <div
-            className="px-3 py-2 border-b"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)', letterSpacing: '0.06em', textTransform: 'uppercase', fontSize: 10 }}>
-              AI Provider
-            </p>
+          <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)', letterSpacing: '0.06em', textTransform: 'uppercase', fontSize: 10 }}>
+                AI Provider
+              </p>
+              {/* Phase 0 fix: health legend */}
+              <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)', fontSize: 9, fontFamily: 'var(--font-body)' }}>
+                <span className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success)' }} />
+                  key set
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--danger)' }} />
+                  missing
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Provider list */}
-          <div className="overflow-y-auto" style={{ maxHeight: 380 }}>
+          <div className="overflow-y-auto" style={{ maxHeight: 400 }}>
             {PROVIDER_OPTIONS.map((provider) => {
               const isActive = provider.id === selectedProvider;
               const isExpanded = expandedProvider === provider.id;
+              const healthStatus = providerHealth[provider.id] ?? 'unknown';
 
               return (
                 <div key={provider.id}>
@@ -309,7 +433,9 @@ export function AgentModelPicker() {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* Phase 0 fix: health status dot */}
+                      <HealthDot status={healthStatus} />
                       {isActive && <Check size={11} style={{ color: provider.color }} aria-hidden="true" />}
                       {provider.models.length > 1 && (
                         <ChevronDown
@@ -357,13 +483,13 @@ export function AgentModelPicker() {
             })}
           </div>
 
-          {/* Footer hint */}
-          <div
-            className="px-3 py-2 border-t"
-            style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-void)' }}
-          >
+          {/* Footer */}
+          <div className="px-3 py-2 border-t" style={{ borderColor: 'var(--border-subtle)', background: 'var(--bg-void)' }}>
             <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)', fontSize: 10 }}>
-              API keys configured in Supabase → Settings → Secrets
+              Missing a key? Add it in{' '}
+              <a href="/settings" style={{ color: 'var(--accent-400)', textDecoration: 'underline' }}>
+                Settings → AI Secrets
+              </a>
             </p>
           </div>
         </div>

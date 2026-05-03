@@ -247,7 +247,7 @@ export const useAppStore = create<AppState>()(
         openFile: (path, language) => set((s) => {
           const existing = s.openTabs.find((t) => t.path === path);
           if (existing) return { activeTabId: existing.id, selectedFilePath: path };
-          const id = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          const id = `tab-${crypto.randomUUID()}`; // Phase 0 fix: use crypto.randomUUID() for stable unique IDs
           const name = path.split('/').pop() ?? path;
           return {
             openTabs: [...s.openTabs, { id, path, name, isDirty: false, language }],
@@ -469,7 +469,7 @@ export const useAppStore = create<AppState>()(
         addNotification: (n) => set((s) => {
           const notification: Notification = {
             ...n,
-            id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            id: `notif-${crypto.randomUUID()}`, // Phase 0 fix: use crypto.randomUUID() for stable unique IDs
             timestamp: Date.now(),
             read: false,
           };
