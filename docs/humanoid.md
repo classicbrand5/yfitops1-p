@@ -62,10 +62,15 @@
 ### AI
 | Technology | Role |
 |---|---|
-| OnSpace AI (ONSPACE_AI_API_KEY) | LLM API proxy |
-| Model: google/gemini-2.5-flash-preview | Default AI model |
-| Supabase Edge Function: agent-inference | Secure AI proxy (auth required) |
-| Structured JSON output (response_format: json_object) | Enforces action schema |
+| OnSpace AI | Default provider (no key config needed) |
+| Google AI Studio | gemini-2.5-flash-preview, 1M context, free |
+| Groq Cloud | llama-3.3-70b-versatile, 600+ tok/s, free |
+| OpenRouter | deepseek-r1:free + 200+ models, free tier |
+| Cloudflare AI | llama-3.3-70b-instruct-fp8, 10k neurons/day free |
+| Cerebras | llama-3.3-70b, 2000+ tok/s, free |
+| Together AI | Qwen2.5-Coder-32B, $1 credit, best for code |
+| Supabase Edge Function: agent-inference v3 | Multi-provider router, rate limiting, SSE streaming |
+| AgentModelPicker component | In-chat provider/model switcher dropdown |
 
 ### Deployment
 | Technology | Role |
@@ -655,6 +660,7 @@ manualChunks: {
 | 10 | Real xterm.js terminal, Monaco model disposal, Dashboard RPC stats, PromptBar file attach, notification persistence |
 | 11-13 | Agent auto-execute (full-auto/auto-safe), xterm command history, Settings → Supabase, GitHub REST API, Analytics real RPC, Stripe checkout + webhook |
 | 14-15 | ConfirmModal gate (data-loss prevention), Monaco ViewState, action CSS tokens, Expert mode steps in AgentMessage, File heatmap in FileTreeNode, enhanced context menu with ConfirmModal delete, WorkspaceErrorBoundary, ConversationSync to Supabase, StatusBar AI counter + WebContainer dot, AgentContextPanel chips, Workspace Snapshot system, fetch-repo-zip edge function, React.lazy import fixes |
+| 16 | Multi-provider AI (7 providers: OnSpace, Google, Groq, OpenRouter, Cloudflare, Cerebras, Together), AgentModelPicker dropdown in chat header, provider/model persisted in Zustand, agent-inference v3 with provider routing + SSE streaming + action validation + rate limiting |
 
 ---
 

@@ -1,6 +1,6 @@
 # YFitOps AI Agent — Project Review & Gap Analysis
 
-**Last updated:** Emergency Fix — Suspense import crash (White Screen)  
+**Last updated:** Phase 16 — Multi-Provider AI Agent Switcher  
 **Purpose:** Document all skipped, deferred, partially implemented, or known-broken items across all phases so nothing falls through the cracks.
 
 ---
@@ -18,6 +18,7 @@
 | Phase 9: WebContainer Fix + Agent Executor + 401 Fix | ✅ Complete | ENOENT fix, agentExecutor wired, PromptBar Enter key, 401 auth fix |
 | Phase 10: Real xterm Terminal + Memory + Stats + File Attach | ✅ Complete | Real xterm.js (esm.sh), Monaco model disposal, Dashboard RPC stats, PromptBar file attach, notification persistence |
 | Phase 11-13: Agent Autonomy, GitHub, Analytics, Stripe, Settings Persist | ✅ Complete | Auto-execute logic, GitHub REST API, real Analytics RPC charts, Stripe checkout, Settings saved to Supabase, xterm history |
+| Phase 16: Multi-Provider AI + Agent Inference v3 | ✅ Complete | Auto-execute logic, GitHub REST API, real Analytics RPC charts, Stripe checkout, Settings saved to Supabase, xterm history |
 
 ---
 
@@ -131,6 +132,13 @@
 | `ONSPACE_AI_API_KEY` | Supabase Edge Function secrets | ✅ Configured |
 | `ONSPACE_AI_BASE_URL` | Supabase Edge Function secrets | ✅ Configured |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Function secrets (auto) | ✅ Auto-set |
+| `GOOGLE_AI_API_KEY` | Supabase Edge Function secrets | From aistudio.google.com |
+| `GROQ_API_KEY` | Supabase Edge Function secrets | From console.groq.com |
+| `OPENROUTER_API_KEY` | Supabase Edge Function secrets | From openrouter.ai/keys |
+| `CLOUDFLARE_AI_API_KEY` | Supabase Edge Function secrets | From dash.cloudflare.com → AI |
+| `CLOUDFLARE_ACCOUNT_ID` | Supabase Edge Function secrets | Cloudflare account ID |
+| `CEREBRAS_API_KEY` | Supabase Edge Function secrets | From inference.cerebras.ai |
+| `TOGETHER_API_KEY` | Supabase Edge Function secrets | From api.together.xyz |
 
 ---
 

@@ -7,6 +7,7 @@ import { PromptBar } from './PromptBar';
 import { useAppStore } from '@/store/useAppStore';
 import { useConversationSync } from '@/hooks/useConversationSync';
 import { Plus, MessageSquare, Trash2, LogIn } from 'lucide-react';
+import { AgentModelPicker } from './AgentModelPicker';
 
 export function AgentChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -73,7 +74,9 @@ export function AgentChat() {
           </span>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          {/* Model switcher */}
+          <AgentModelPicker />
           {activeConversationId && (
             <button
               className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
@@ -85,15 +88,28 @@ export function AgentChat() {
               <Trash2 size={12} />
             </button>
           )}
-          <button
-            className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
-            style={{ color: 'var(--text-muted)' }}
-            onClick={handleNewConversation}
-            aria-label="New conversation"
-            title="New conversation"
-          >
-            <Plus size={12} />
-          </button>
+          {activeConversationId && (
+            <button
+              className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
+              style={{ color: 'var(--text-muted)' }}
+              onClick={handleNewConversation}
+              aria-label="New conversation"
+              title="New conversation"
+            >
+              <Plus size={12} />
+            </button>
+          )}
+          {!activeConversationId && (
+            <button
+              className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
+              style={{ color: 'var(--text-muted)' }}
+              onClick={handleNewConversation}
+              aria-label="New conversation"
+              title="New conversation"
+            >
+              <Plus size={12} />
+            </button>
+          )}
         </div>
       </div>
 

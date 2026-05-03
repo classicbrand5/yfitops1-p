@@ -77,6 +77,8 @@ export function useAIAgent() {
     agentAutonomy,
     agentContext,
     expertMode,
+    selectedProvider,
+    selectedModel,
     addConversation,
     setActiveConversation,
     addMessage,
@@ -297,7 +299,10 @@ export function useAIAgent() {
           messages: history,
           conversationId: targetConvId,
           expertMode,
-          workspaceContext: agentContext,
+          context: agentContext,
+          provider: selectedProvider,
+          model: selectedModel,
+          stream: false,
         },
       });
 
@@ -353,6 +358,8 @@ export function useAIAgent() {
     setStreamingMessageId,
     createConversation,
     agentAutonomy,
+    selectedProvider,
+    selectedModel,
   ]);
 
   return {

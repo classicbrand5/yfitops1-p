@@ -81,6 +81,10 @@ export interface AppState {
   agentAutonomy: AgentAutonomy;
   agentContext: AgentContext;
 
+  // AI Provider / Model selection (persisted)
+  selectedProvider: string;
+  selectedModel: string;
+
   // Notifications
   notifications: Notification[];
   unreadNotificationCount: number;
@@ -145,6 +149,10 @@ export interface AppState {
   updateAgentContext: (patch: Partial<AgentContext>) => void;
   clearChat: (convId: string) => void;
 
+  // AI Provider
+  setSelectedProvider: (provider: string) => void;
+  setSelectedModel: (model: string) => void;
+
   // Notifications
   addNotification: (n: Omit<Notification, 'id' | 'timestamp' | 'read'>) => void;
   markNotificationRead: (id: string) => void;
@@ -202,6 +210,9 @@ export const useAppStore = create<AppState>()(
           includeTerminalOutput: true,
           maxContextLines: 500,
         },
+
+        selectedProvider: 'onspace',
+        selectedModel: 'google/gemini-2.5-flash-preview',
 
         notifications: [],
         unreadNotificationCount: 0,
@@ -450,6 +461,10 @@ export const useAppStore = create<AppState>()(
         updateAgentContext: (patch) => set((s) => ({ agentContext: { ...s.agentContext, ...patch } })),
         clearChat: (convId) => set((s) => ({ messages: { ...s.messages, [convId]: [] } })),
 
+        // ── AI Provider ──
+        setSelectedProvider: (provider) => set({ selectedProvider: provider }),
+        setSelectedModel: (model) => set({ selectedModel: model }),
+
         // ── Notifications ──
         addNotification: (n) => set((s) => {
           const notification: Notification = {
@@ -482,6 +497,8 @@ export const useAppStore = create<AppState>()(
           theme: state.theme,
           expertMode: state.expertMode,
           agentAutonomy: state.agentAutonomy,
+          selectedProvider: state.selectedProvider,
+          selectedModel: state.selectedModel,
           agentContext: state.agentContext,
           expandedFolders: state.expandedFolders,
           activeConversationId: state.activeConversationId,
