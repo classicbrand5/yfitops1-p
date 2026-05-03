@@ -2,19 +2,29 @@ name: Mirror to public repo
 
 on:
   push:
-    branches: [main]   # or whatever your default branch is
+    branches: [main]
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
+
+    # Grant write permission to contents (needed for the private repo checkout itself)
+    permissions:
+      contents: read
+
     steps:
-      - name: Checkout private repo (full history)
+      - name: Checkout private repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false   # ← THIS IS THE KEY FIX
 
       - name: Push to public mirror
+        env:
+          PAT: ${{ secrets.DEPLOY_KEY }}
         run: |
-          git remote add public https://x-access-token:${{ secrets.DEPLOY_KEY }}@github.com/classicbrand5/yfitops1-p.git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add public https://x-access-token:${PAT}@github.com/classicbrand5/yfitops1-p.git
           git push public --force --all
           git push public --force --tags
