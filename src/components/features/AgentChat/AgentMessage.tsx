@@ -220,9 +220,22 @@ export function AgentMessage({ message }: AgentMessageProps) {
             </div>
           )}
 
-          {/* Streaming indicator */}
+          {/* Streaming cursor — blinks while tokens are arriving */}
           {message.isStreaming && (
-            <span className="inline-block animate-terminal-cursor" style={{ color: 'var(--accent-400)', marginLeft: 2 }}>▌</span>
+            <span
+              className="inline-block"
+              style={{
+                color: 'var(--accent-400)',
+                marginLeft: 2,
+                animation: 'terminal-cursor 1s step-end infinite',
+                verticalAlign: 'text-bottom',
+                lineHeight: 1,
+              }}
+              aria-hidden="true"
+              aria-label="Streaming"
+            >
+              ▌
+            </span>
           )}
         </div>
 

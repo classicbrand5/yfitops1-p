@@ -661,6 +661,7 @@ manualChunks: {
 | 11-13 | Agent auto-execute (full-auto/auto-safe), xterm command history, Settings → Supabase, GitHub REST API, Analytics real RPC, Stripe checkout + webhook |
 | 14-15 | ConfirmModal gate (data-loss prevention), Monaco ViewState, action CSS tokens, Expert mode steps in AgentMessage, File heatmap in FileTreeNode, enhanced context menu with ConfirmModal delete, WorkspaceErrorBoundary, ConversationSync to Supabase, StatusBar AI counter + WebContainer dot, AgentContextPanel chips, Workspace Snapshot system, fetch-repo-zip edge function, React.lazy import fixes |
 | 16 | Multi-provider AI (7 providers: OnSpace, Google, Groq, OpenRouter, Cloudflare, Cerebras, Together), AgentModelPicker dropdown in chat header, provider/model persisted in Zustand, agent-inference v3 with provider routing + SSE streaming + action validation + rate limiting |
+| 17 | Typed SSE streaming protocol (t:token/done/error frames), useStreamingAgent hook replaces useAIAgent, real-time token-by-token rendering with blinking cursor, cancel stream button (Stop), JSON wrapper stripping for json_object mode providers, _shared/contextTrimmer + _shared/actionValidator edge function modules, all 7 provider API keys wired, agent-inference v4 |
 
 ---
 

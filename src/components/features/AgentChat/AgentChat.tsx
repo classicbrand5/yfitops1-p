@@ -1,12 +1,12 @@
 // src/components/features/AgentChat/AgentChat.tsx
 import React, { useEffect, useRef } from 'react';
-import { useAIAgent } from '@/hooks/useAIAgent';
+import { useStreamingAgent } from '@/hooks/useStreamingAgent';
 import { AgentMessage } from './AgentMessage';
 import { AgentThinking } from './AgentThinking';
 import { PromptBar } from './PromptBar';
 import { useAppStore } from '@/store/useAppStore';
 import { useConversationSync } from '@/hooks/useConversationSync';
-import { Plus, MessageSquare, Trash2, LogIn } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, LogIn, Square } from 'lucide-react';
 import { AgentModelPicker } from './AgentModelPicker';
 
 export function AgentChat() {
@@ -16,12 +16,14 @@ export function AgentChat() {
     activeConversationId,
     activeMessages,
     isThinking,
+    isStreaming,
     isAuthenticated,
     createConversation,
     sendMessage,
+    cancelStream,
     clearChat,
     setActiveConversation,
-  } = useAIAgent();
+  } = useStreamingAgent();
 
   // Sync conversations to Supabase
   const { syncToSupabase } = useConversationSync();
@@ -77,7 +79,28 @@ export function AgentChat() {
         <div className="flex items-center gap-1.5">
           {/* Model switcher */}
           <AgentModelPicker />
-          {activeConversationId && (
+
+          {/* Cancel stream button — visible only during active streaming */}
+          {isStreaming && (
+            <button
+              className="flex items-center gap-1 px-2 py-1 rounded transition-all hover:opacity-80"
+              style={{
+                background: 'rgba(255,77,109,0.10)',
+                border: '1px solid rgba(255,77,109,0.25)',
+                color: 'var(--danger)',
+                fontSize: 10,
+                fontFamily: 'var(--font-body)',
+              }}
+              onClick={cancelStream}
+              aria-label="Stop generation"
+              title="Stop generation"
+            >
+              <Square size={9} fill="currentColor" aria-hidden="true" />
+              Stop
+            </button>
+          )}
+
+          {activeConversationId && !isStreaming && (
             <button
               className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
               style={{ color: 'var(--text-muted)' }}
@@ -88,28 +111,15 @@ export function AgentChat() {
               <Trash2 size={12} />
             </button>
           )}
-          {activeConversationId && (
-            <button
-              className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
-              style={{ color: 'var(--text-muted)' }}
-              onClick={handleNewConversation}
-              aria-label="New conversation"
-              title="New conversation"
-            >
-              <Plus size={12} />
-            </button>
-          )}
-          {!activeConversationId && (
-            <button
-              className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
-              style={{ color: 'var(--text-muted)' }}
-              onClick={handleNewConversation}
-              aria-label="New conversation"
-              title="New conversation"
-            >
-              <Plus size={12} />
-            </button>
-          )}
+          <button
+            className="flex items-center justify-center w-7 h-7 rounded transition-all hover:opacity-80"
+            style={{ color: 'var(--text-muted)' }}
+            onClick={handleNewConversation}
+            aria-label="New conversation"
+            title="New conversation"
+          >
+            <Plus size={12} />
+          </button>
         </div>
       </div>
 
@@ -194,7 +204,8 @@ export function AgentChat() {
           <AgentMessage key={msg.id} message={msg} />
         ))}
 
-        {isThinking && <AgentThinking />}
+        {/* Show thinking dots only when thinking AND no streaming content yet */}
+        {isThinking && !isStreaming && <AgentThinking />}
 
         <div ref={messagesEndRef} />
       </div>

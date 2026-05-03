@@ -132,13 +132,13 @@
 | `ONSPACE_AI_API_KEY` | Supabase Edge Function secrets | ✅ Configured |
 | `ONSPACE_AI_BASE_URL` | Supabase Edge Function secrets | ✅ Configured |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Function secrets (auto) | ✅ Auto-set |
-| `GOOGLE_AI_API_KEY` | Supabase Edge Function secrets | From aistudio.google.com |
-| `GROQ_API_KEY` | Supabase Edge Function secrets | From console.groq.com |
-| `OPENROUTER_API_KEY` | Supabase Edge Function secrets | From openrouter.ai/keys |
-| `CLOUDFLARE_AI_API_KEY` | Supabase Edge Function secrets | From dash.cloudflare.com → AI |
+| `GOOGLE_AI_API_KEY` | Supabase Edge Function secrets | From aistudio.google.com — ✅ Added |
+| `GROQ_API_KEY` | Supabase Edge Function secrets | From console.groq.com — ✅ Added |
+| `OPENROUTER_API_KEY` | Supabase Edge Function secrets | From openrouter.ai/keys — ✅ Added |
+| `CLOUDFLARE_AI_API_KEY` | Supabase Edge Function secrets | From dash.cloudflare.com → AI — ✅ Added |
 | `CLOUDFLARE_ACCOUNT_ID` | Supabase Edge Function secrets | Cloudflare account ID |
-| `CEREBRAS_API_KEY` | Supabase Edge Function secrets | From inference.cerebras.ai |
-| `TOGETHER_API_KEY` | Supabase Edge Function secrets | From api.together.xyz |
+| `CEREBRAS_API_KEY` | Supabase Edge Function secrets | From inference.cerebras.ai — ✅ Added |
+| `TOGETHER_AI_API_KEY` | Supabase Edge Function secrets | From api.together.xyz — ✅ Added (edge fn uses this key name) |
 
 ---
 
