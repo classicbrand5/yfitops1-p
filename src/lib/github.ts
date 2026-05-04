@@ -1,10 +1,8 @@
 // src/lib/github.ts
 // GitHub REST API integration via raw fetch (no Octokit dep needed)
 // Uses the user's github_access_token stored in the profiles table.
-// Phase 1: added cloneRepoIntoWebContainer via isomorphic-git + WebContainer FS adapter.
 
 import { supabase } from '@/lib/supabase';
-import type { WebContainer } from '@webcontainer/api';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -145,123 +143,6 @@ export async function connectReposToSupabase(repos: GitHubRepo[]): Promise<void>
     .upsert(rows, { onConflict: 'user_id,repo_owner,repo_name', ignoreDuplicates: false });
 
   if (error) throw new Error(`Failed to connect repos: ${error.message}`);
-}
-
-// ── WebContainer FS Adapter for isomorphic-git ─────────────────────────────
-// Maps isomorphic-git's fs interface to the WebContainer FileSystem API.
-// isomorphic-git calls these via the `fs` option in git.clone().
-
-function makeWcFsAdapter(container: WebContainer) {
-  const fs = container.fs as unknown as {
-    readFile(path: string, opts?: { encoding?: string }): Promise<string | Uint8Array>;
-    writeFile(path: string, data: string | Uint8Array, opts?: unknown): Promise<void>;
-    rm(path: string, opts?: { recursive?: boolean }): Promise<void>;
-    readdir(path: string, opts?: { withFileTypes?: boolean }): Promise<string[]>;
-    mkdir(path: string, opts?: { recursive?: boolean }): Promise<void>;
-    stat(path: string): Promise<{ type: string; size: number; mtimeMs: number }>;
-  };
-
-  return {
-    promises: {
-      readFile: (p: string, opts?: { encoding?: BufferEncoding }) =>
-        opts?.encoding
-          ? fs.readFile(p, { encoding: opts.encoding }) as Promise<string>
-          : fs.readFile(p) as Promise<Uint8Array>,
-      writeFile: (p: string, d: string | Uint8Array, _opts?: unknown) => fs.writeFile(p, d),
-      unlink: (p: string) => fs.rm(p),
-      readdir: (p: string, _opts?: unknown) => fs.readdir(p),
-      mkdir: (p: string, _opts?: unknown) => fs.mkdir(p, { recursive: true }),
-      rmdir: (p: string) => fs.rm(p, { recursive: true }),
-      stat: async (p: string) => {
-        const s = await fs.stat(p);
-        const isDir = s.type === 'directory';
-        return {
-          isFile: () => !isDir,
-          isDirectory: () => isDir,
-          isSymbolicLink: () => false,
-          size: s.size,
-          mtimeMs: s.mtimeMs,
-          mode: isDir ? 0o40755 : 0o100644,
-          uid: 1000,
-          gid: 1000,
-        };
-      },
-      lstat: async (p: string) => {
-        const s = await fs.stat(p);
-        const isDir = s.type === 'directory';
-        return {
-          isFile: () => !isDir,
-          isDirectory: () => isDir,
-          isSymbolicLink: () => false,
-          size: s.size,
-          mtimeMs: s.mtimeMs,
-          mode: isDir ? 0o40755 : 0o100644,
-          uid: 1000,
-          gid: 1000,
-        };
-      },
-      symlink: async () => {},
-      readlink: async (p: string) => p,
-      chmod: async () => {},
-    },
-  };
-}
-
-export interface CloneProgress {
-  phase?: string;
-  loaded?: number;
-  total?: number;
-  lengthComputable?: boolean;
-}
-
-/**
- * Phase 1: Clone a GitHub repo into the WebContainer filesystem using isomorphic-git.
- * Uses a depth-1 shallow clone with a single branch for speed.
- * @param container - Booted WebContainer instance
- * @param repoUrl   - HTTPS URL of the repo (e.g. https://github.com/owner/repo)
- * @param token     - GitHub user access token (for private repos)
- * @param targetDir - Destination directory inside WebContainer (e.g. /workspace/my-repo)
- * @param onProgress - Optional callback for progress updates
- */
-export async function cloneRepoIntoWebContainer(
-  container: WebContainer,
-  repoUrl: string,
-  token: string,
-  targetDir = '/workspace',
-  onProgress?: (progress: CloneProgress) => void,
-): Promise<void> {
-  // Dynamically import isomorphic-git to avoid bundling it unless needed.
-  // The package auto-installs via depcheck if not present.
-  const git = await import('isomorphic-git');
-  const http = await import('isomorphic-git/http/web');
-
-  const wcFs = makeWcFsAdapter(container);
-
-  // Ensure the target directory exists
-  try {
-    await container.fs.mkdir(targetDir, { recursive: true } as Parameters<typeof container.fs.mkdir>[1]);
-  } catch {
-    // Directory may already exist
-  }
-
-  console.log(`[git clone] Cloning ${repoUrl} → ${targetDir}`);
-
-  await git.clone({
-    fs: wcFs,
-    http: http.default ?? http,
-    dir: targetDir,
-    url: repoUrl,
-    onAuth: () => ({ username: token, password: '' }),
-    depth: 1,
-    singleBranch: true,
-    onProgress: (event: CloneProgress) => {
-      console.log('[git clone]', event.phase, event.loaded, '/', event.total);
-      onProgress?.(event);
-    },
-    onMessage: (msg: string) => console.log('[git clone msg]', msg),
-  });
-
-  console.log(`[git clone] Done → ${targetDir}`);
 }
 
 /** Create a pull request */

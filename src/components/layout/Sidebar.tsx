@@ -1,6 +1,5 @@
 // src/components/layout/Sidebar.tsx
-// Phase 1: Added GitHub icon with install/repo-picker routing logic
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
 import {
@@ -15,15 +14,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
-  Github,
 } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { RepoPickerModal } from '@/components/features/RepoPickerModal';
-import { supabase, isSupabaseReady } from '@/lib/supabase';
 
 interface NavItem {
   icon: React.ElementType;
@@ -52,46 +48,7 @@ export function Sidebar() {
   const location = useLocation();
   const { sidebarCollapsed, setSidebarCollapsed, user } = useAppStore();
 
-  // Phase 1: Track GitHub App installation state and repo picker modal
-  const [githubInstallationId, setGithubInstallationId] = useState<number | null>(null);
-  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
-
-  // Fetch installation_id from profile when user is authenticated
-  useEffect(() => {
-    if (!user || !isSupabaseReady || !supabase) return;
-    let cancelled = false;
-    supabase
-      .from('profiles')
-      .select('github_installation_id')
-      .eq('id', user.id)
-      .single()
-      .then(({ data }) => {
-        if (!cancelled && data?.github_installation_id) {
-          setGithubInstallationId(data.github_installation_id as number);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [user?.id]);
-
-  function handleGitHubClick() {
-    if (githubInstallationId) {
-      // Already installed → open repo picker
-      setRepoPickerOpen(true);
-    } else {
-      // Not installed → open GitHub App installation page in new tab
-      window.open('https://github.com/apps/yfitops-ai/installations/new', '_blank', 'noopener,noreferrer');
-    }
-  }
-
   const width = sidebarCollapsed ? 56 : 220;
-
-  // Build the GitHub nav item dynamically
-  const githubNavItem = {
-    label: githubInstallationId ? 'GitHub Repos' : 'Connect GitHub',
-    icon: Github,
-    isAccent: false,
-    onClick: handleGitHubClick,
-  };
 
   function isActive(href: string): boolean {
     return location.pathname === href;
@@ -136,9 +93,6 @@ export function Sidebar() {
           </span>
         )}
       </div>
-
-      {/* Phase 1: Repo picker modal */}
-      <RepoPickerModal open={repoPickerOpen} onClose={() => setRepoPickerOpen(false)} />
 
       {/* Top nav items */}
       <nav className="flex-1 py-3 overflow-y-auto" aria-label="Primary navigation">
@@ -193,55 +147,6 @@ export function Sidebar() {
             }
             return button;
           })}
-
-          {/* Phase 1: GitHub icon — install or repo picker */}
-          {(() => {
-            const GitHubIcon = githubNavItem.icon;
-            const gitHubBtn = (
-              <li key="github" role="listitem">
-                <button
-                  className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 group min-h-[44px]"
-                  style={{
-                    color: githubInstallationId ? 'var(--accent-400)' : 'var(--text-muted)',
-                    background: 'transparent',
-                    borderLeft: '3px solid transparent',
-                  }}
-                  onClick={handleGitHubClick}
-                  aria-label={githubNavItem.label}
-                  title={githubInstallationId ? 'Browse & clone repos' : 'Install GitHub App'}
-                >
-                  <GitHubIcon
-                    size={18}
-                    className="flex-shrink-0 transition-colors"
-                    style={{ color: githubInstallationId ? 'var(--accent-400)' : 'var(--text-muted)' }}
-                  />
-                  {!sidebarCollapsed && (
-                    <span className="truncate">{githubNavItem.label}</span>
-                  )}
-                  {/* Green dot = connected */}
-                  {githubInstallationId && !sidebarCollapsed && (
-                    <span
-                      className="ml-auto w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ background: 'var(--accent-400)' }}
-                      aria-label="GitHub connected"
-                    />
-                  )}
-                </button>
-              </li>
-            );
-
-            if (sidebarCollapsed) {
-              return (
-                <Tooltip key="github">
-                  <TooltipTrigger asChild>{gitHubBtn}</TooltipTrigger>
-                  <TooltipContent side="right" className="glass">
-                    <p style={{ color: 'var(--text-primary)', fontSize: 13 }}>{githubNavItem.label}</p>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            }
-            return gitHubBtn;
-          })()}
         </ul>
       </nav>
 
