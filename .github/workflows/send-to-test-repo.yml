@@ -1,0 +1,29 @@
+name: Mirror to private repo
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Push to private mirror
+        env:
+          PAT: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add collective https://x-access-token:${PAT}@github.com/classicbrand5/YFitOps-Collective.git
+          git push collective --force --all
+          git push collective --force --tags
