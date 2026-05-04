@@ -13,15 +13,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Touch every file
         run: |
           find . -type f \( ! -path './.git/*' \) -exec touch {} \;
 
-      - name: Commit and push
+      - name: Commit and push to collective
+        env:
+          PAT: ${{ secrets.DEPLOY_TEST_KEY }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add collective https://x-access-token:${PAT}@github.com/classicbrand5/YFitOps-Collective.git
           git add -A
           git commit -m "chore: refresh all file timestamps to sync with OnSpace AI" || echo "No changes to commit"
-          git push origin HEAD:main
+          git push collective --force HEAD:main
