@@ -1,0 +1,50 @@
+name: Deploy yfitops to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+
+# Grant write access so the workflow can push the updated lockfile
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Auto‑update lockfile if needed
+      - name: Install dependencies (regenerates lockfile)
+        run: npm install
+
+      - name: Commit updated lockfile
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update package-lock.json [skip ci]"
+          file_pattern: "package-lock.json"
+          commit_options: '--no-verify'
+          push_options: '--force'
+          skip_fetch: false
+
+      # Build and deploy
+      - name: Build the project
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: yfitops          # ← changed from yfitops1
+          directory: dist
