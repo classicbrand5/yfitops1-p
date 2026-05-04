@@ -8,6 +8,7 @@ import { TerminalPanel } from '@/components/features/Terminal/TerminalPanel';
 import { AgentChat } from '@/components/features/AgentChat/AgentChat';
 import { useAppStore } from '@/store/useAppStore';
 import { useWebContainer } from '@/hooks/useWebContainer';
+import { PanelErrorBoundary } from '@/components/ui/PanelErrorBoundary'; // Phase 2 fix: per-panel error boundaries
 import { Zap, RefreshCw, AlertTriangle } from 'lucide-react';
 
 // ── WebContainer boot overlay ──────────────────────────────
@@ -127,30 +128,57 @@ export default function WorkspacePage() {
         return (
           <div className="flex h-full overflow-hidden">
             <div className="w-56 flex-shrink-0" style={{ borderRight: '1px solid var(--border-subtle)' }}>
-              <FileExplorer />
+              {/* Phase 2 fix: FileExplorer wrapped in PanelErrorBoundary */}
+              <PanelErrorBoundary panelName="Explorer">
+                <FileExplorer />
+              </PanelErrorBoundary>
             </div>
             <div className="flex-1 overflow-hidden">
-              <CodeEditor />
+              {/* Phase 2 fix: CodeEditor wrapped in PanelErrorBoundary */}
+              <PanelErrorBoundary panelName="Editor">
+                <CodeEditor />
+              </PanelErrorBoundary>
             </div>
           </div>
         );
 
       case 'terminal-only':
-        return <TerminalPanel />;
+        return (
+          // Phase 2 fix: TerminalPanel wrapped in PanelErrorBoundary
+          <PanelErrorBoundary panelName="Terminal">
+            <TerminalPanel />
+          </PanelErrorBoundary>
+        );
 
       case 'chat-only':
-        return <AgentChat />;
+        return (
+          // Phase 2 fix: AgentChat wrapped in PanelErrorBoundary
+          <PanelErrorBoundary panelName="Agent">
+            <AgentChat />
+          </PanelErrorBoundary>
+        );
 
       case 'split-vertical':
         return (
           <div className="flex h-full overflow-hidden">
             <div className="w-52 flex-shrink-0" style={{ borderRight: '1px solid var(--border-subtle)' }}>
-              <FileExplorer />
+              {/* Phase 2 fix: Explorer wrapped */}
+              <PanelErrorBoundary panelName="Explorer">
+                <FileExplorer />
+              </PanelErrorBoundary>
             </div>
             <SplitLayout
               direction="vertical"
-              top={<CodeEditor />}
-              bottom={<AgentChat />}
+              top={
+                <PanelErrorBoundary panelName="Editor">
+                  <CodeEditor />
+                </PanelErrorBoundary>
+              }
+              bottom={
+                <PanelErrorBoundary panelName="Agent">
+                  <AgentChat />
+                </PanelErrorBoundary>
+              }
             />
           </div>
         );
@@ -159,20 +187,33 @@ export default function WorkspacePage() {
         return (
           <div className="flex h-full overflow-hidden">
             <div className="w-52 flex-shrink-0" style={{ borderRight: '1px solid var(--border-subtle)' }}>
-              <FileExplorer />
+              {/* Phase 2 fix: all panels wrapped */}
+              <PanelErrorBoundary panelName="Explorer">
+                <FileExplorer />
+              </PanelErrorBoundary>
             </div>
             <div className="flex-1 overflow-hidden">
               <SplitLayout
                 direction="horizontal"
-                top={<CodeEditor />}
-                bottom={<TerminalPanel />}
+                top={
+                  <PanelErrorBoundary panelName="Editor">
+                    <CodeEditor />
+                  </PanelErrorBoundary>
+                }
+                bottom={
+                  <PanelErrorBoundary panelName="Terminal">
+                    <TerminalPanel />
+                  </PanelErrorBoundary>
+                }
               />
             </div>
             <div
               className="flex-shrink-0"
               style={{ width: rightPanelWidth, borderLeft: '1px solid var(--border-subtle)' }}
             >
-              <AgentChat />
+              <PanelErrorBoundary panelName="Agent">
+                <AgentChat />
+              </PanelErrorBoundary>
             </div>
           </div>
         );
@@ -181,26 +222,38 @@ export default function WorkspacePage() {
       default:
         return (
           <div className="flex h-full overflow-hidden">
-            {/* File Explorer */}
+            {/* File Explorer — Phase 2 fix: wrapped in PanelErrorBoundary */}
             <div className="w-52 flex-shrink-0" style={{ borderRight: '1px solid var(--border-subtle)' }}>
-              <FileExplorer />
+              <PanelErrorBoundary panelName="Explorer">
+                <FileExplorer />
+              </PanelErrorBoundary>
             </div>
 
-            {/* Editor + Terminal split */}
+            {/* Editor + Terminal split — Phase 2 fix: each panel wrapped */}
             <div className="flex-1 overflow-hidden">
               <SplitLayout
                 direction="horizontal"
-                top={<CodeEditor />}
-                bottom={<TerminalPanel />}
+                top={
+                  <PanelErrorBoundary panelName="Editor">
+                    <CodeEditor />
+                  </PanelErrorBoundary>
+                }
+                bottom={
+                  <PanelErrorBoundary panelName="Terminal">
+                    <TerminalPanel />
+                  </PanelErrorBoundary>
+                }
               />
             </div>
 
-            {/* Agent Chat */}
+            {/* Agent Chat — Phase 2 fix: wrapped in PanelErrorBoundary */}
             <div
               className="flex-shrink-0"
               style={{ width: rightPanelWidth, borderLeft: '1px solid var(--border-subtle)' }}
             >
-              <AgentChat />
+              <PanelErrorBoundary panelName="Agent">
+                <AgentChat />
+              </PanelErrorBoundary>
             </div>
           </div>
         );

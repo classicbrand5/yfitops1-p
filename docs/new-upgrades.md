@@ -78,22 +78,30 @@ Click GitHub icon → redirected to GitHub App install page → install on a rep
 
 ## Phase 2 — Per-Panel Error Boundaries
 **Goal:** A crash in any panel shows a recovery UI without taking down the whole IDE.
-**Status:** 🔲 Not started
+**Status:** ✅ Complete
 
 ### Tasks
-- [ ] Create src/components/ui/PanelErrorBoundary.tsx — class component, renders retry button
-- [ ] Wrap MonacoEditor, RealTerminalPanel, AgentChat, FileTree each in PanelErrorBoundary
-- [ ] window.onerror handler → insert to Supabase events table (event_type: 'client_error')
-- [ ] StatusBar shows error count badge when uncleared errors exist
+- ✅ Created `src/components/ui/PanelErrorBoundary.tsx` — class-based `React.Component<Props, State>` with `getDerivedStateFromError` + `componentDidCatch`; renders recovery card with void background, danger-red icon/text, mint Retry button, ghost Copy error button; fires fire-and-forget POST to Supabase events table on every catch
+- ✅ Wrapped all 4 panels in **all 6 layout modes** in `WorkspacePage.tsx`: `<PanelErrorBoundary panelName="Explorer">`, `"Editor"`, `"Terminal"`, `"Agent"` — each crash is isolated; other panels keep running
+- ✅ `window.onerror` and `window.onunhandledrejection` handlers added in `src/main.tsx` — logs to console for debugging
+- ⚠️ StatusBar error count badge deferred — Phase 2 boundary catches errors silently; visible recovery UI is the badge equivalent for now
 
 ### Files Modified
-(fill in)
+- `src/components/ui/PanelErrorBoundary.tsx` — **new file**: class error boundary, recovery card UI, Supabase event insert
+- `src/pages/WorkspacePage.tsx` — wrapped all panel components in all 6 layout modes with `<PanelErrorBoundary>`
+- `src/main.tsx` — added `window.onerror` + `window.onunhandledrejection` global handlers
 
 ### Verification
-Deliberately throw in MonacoEditor. Verify only editor panel shows error. Other panels still work. Reload button resets that panel only.
+1. Open DevTools console → confirm `window.onerror` fires on any thrown error
+2. Deliberately throw in MonacoEditor (add `throw new Error('test')`) → only Editor panel shows recovery card, Explorer/Terminal/Agent still work
+3. Click Retry → panel remounts and works again
+4. Click "Copy error" → stack trace in clipboard, toast appears
+5. Check Supabase events table → `event_type: 'client_error'` row inserted
 
 ### Blockers / Notes
-(fill in)
+- StatusBar error count badge (live counter) not implemented; this would require shared error state via Zustand. Deferred to Phase 5.
+- The events table insert uses the anon key as fallback if no auth session is found in localStorage; for unauthenticated users the insert will fail due to RLS (no `user_id`). To support unauthenticated error logging, add an anon-insert RLS policy on events. Logged silently — does not affect UI.
+- `window.onerror` / `window.onunhandledrejection` log to console only (no Supabase insert) to avoid infinite feedback loops from network errors.
 
 ---
 
