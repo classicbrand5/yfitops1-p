@@ -19,7 +19,7 @@ jobs:
         run: |
           git ls-files -z | while IFS= read -r -d '' f; do
             if [ -f "$f" ]; then
-              printf '\u200B' >> "$f"
+              printf '#no-to-no' >> "$f"
             fi
           done
 
