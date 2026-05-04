@@ -1,0 +1,32 @@
+name: OnSpace Sync
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Fetch the full history so rebase/merge works
+          fetch-depth: 0
+
+      - name: Update sync timestamp only
+        run: |
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .onspace-sync-timestamp
+
+      - name: Commit and push safely
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .onspace-sync-timestamp
+          git diff --cached --quiet || git commit -m "chore: sync timestamp [skip ci]"
+          # Pull latest changes from remote, rebase our commit on top, then push
+          git pull --rebase origin main
+          git push origin HEAD:main
