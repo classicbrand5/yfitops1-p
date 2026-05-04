@@ -19,6 +19,8 @@ const Analytics  = lazy(() => import('./pages/Analytics'));
 const BuildMonitor = lazy(() => import('./pages/BuildMonitor'));
 const Settings   = lazy(() => import('./pages/Settings'));
 const Billing    = lazy(() => import('./pages/Billing'));
+// Phase 1: GitHub App OAuth callback
+const GitHubCallback = lazy(() => import('./pages/GitHubCallback'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -154,6 +156,9 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
+
+            {/* Phase 1: GitHub App OAuth callback — semi-public (needs auth internally) */}
+            <Route path="/auth/github/callback" element={<GitHubCallback />} />
 
             {/* Catch-all */}
             <Route path="*" element={<NotFound />} />

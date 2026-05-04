@@ -31,6 +31,7 @@ export interface AuthUser {
   role: string;
   plan: 'starter' | 'pro' | 'team';
   githubUsername?: string;
+  githubInstallationId?: number; // Phase 1: GitHub App installation ID
 }
 
 // ── Store Interface ────────────────────────────────────────

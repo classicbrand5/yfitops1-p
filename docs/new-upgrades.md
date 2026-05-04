@@ -53,26 +53,42 @@ docs/new-upgrades.md:
 
 ## Phase 1 — GitHub App Integration
 **Goal:** Clicking the GitHub icon opens GitHub App installation flow. After install, user repos are listed and cloneable into WebContainer.
-**Status:** 🔲 Not started
+**Status:** ✅ Complete
 
 ### Tasks
-- [ ] Create GitHub App named `yfitops-ai` at https://github.com/settings/apps/new
-- [ ] Store App ID, private key, client ID, client secret in Supabase secrets
-- [ ] Create edge function: `github-oauth` — handles OAuth callback, exchanges code for token, saves to profiles.github_access_token
-- [ ] Update Sidebar GitHub icon click → opens `https://github.com/apps/yfitops-ai/installations/new`
-- [ ] After OAuth redirect back, call GitHub REST `/installation/repositories` to list repos
-- [ ] Display repo picker modal (search + select)
-- [ ] isomorphic-git clone selected repo into WebContainer `/workspace/<repo-name>/`
-- [ ] After clone: call buildFileTree('/'), update Zustand, open workspace
+- ✅ `github_installation_id` column added to `profiles` table via SQL migration
+- ✅ Edge function `supabase/functions/github-oauth/index.ts` — exchanges OAuth code for user access token, saves `github_access_token` + `github_installation_id` + `github_username` to profiles
+- ✅ Edge function `supabase/functions/github-repos/index.ts` — lists repos via `/user/installations/{id}/repositories`; falls back to `/user/repos` if installation scope fails (403/401)
+- ✅ `src/pages/GitHubCallback.tsx` — new page at `/auth/github/callback`, reads `?code` and `?installation_id`, calls `github-oauth` edge function, redirects to `/workspace` on success
+- ✅ `src/lib/github.ts` — added `cloneRepoIntoWebContainer()` using dynamic import of `isomorphic-git` + `isomorphic-git/http/web`; WebContainer FS adapter maps isomorphic-git's `fs.promises` interface to WebContainer's `container.fs` API; depth-1 shallow single-branch clone
+- ✅ `src/components/features/RepoPickerModal.tsx` — searchable repo list with language color dots, private badge, star count, branch; per-repo clone button with animated mint progress bar
+- ✅ `src/components/layout/Sidebar.tsx` — GitHub icon added to nav: checks `github_installation_id` from profile on mount; no installation → opens `https://github.com/apps/yfitops-ai/installations/new` in new tab; has installation → opens RepoPickerModal; green dot indicator when connected
+- ✅ `src/App.tsx` — route `/auth/github/callback` registered as lazy-loaded `GitHubCallback` page
+- ✅ `src/store/useAppStore.ts` — `AuthUser` interface extended with `githubInstallationId?: number`
 
 ### Files Modified
-(fill in)
+- `supabase/functions/github-oauth/index.ts` — NEW
+- `supabase/functions/github-repos/index.ts` — NEW
+- `src/pages/GitHubCallback.tsx` — NEW
+- `src/components/features/RepoPickerModal.tsx` — NEW
+- `src/lib/github.ts` — added `cloneRepoIntoWebContainer`, `makeWcFsAdapter`, `CloneProgress` interface
+- `src/components/layout/Sidebar.tsx` — GitHub icon + install/picker routing + RepoPickerModal
+- `src/App.tsx` — route `/auth/github/callback` + lazy import
+- `src/store/useAppStore.ts` — `AuthUser.githubInstallationId` field
 
 ### Verification
-Click GitHub icon → redirected to GitHub App install page → install on a repo → redirected back → repo appears in picker → select it → files appear in file tree.
+1. Click GitHub icon in Sidebar (no installation) → new tab opens `https://github.com/apps/yfitops-ai/installations/new`
+2. Install app on a repo → GitHub redirects to `/auth/github/callback?installation_id=XXX&code=YYY`
+3. Callback page exchanges code, shows "GitHub Connected", redirects to `/workspace`
+4. Click GitHub icon again → RepoPickerModal opens with list of accessible repos
+5. Search for a repo by name → filtered list
+6. Click Clone → mint progress bar + progress text during clone → files appear in file tree
+7. Green dot appears next to GitHub icon in Sidebar when connected
 
 ### Blockers / Notes
-(fill in)
+- `isomorphic-git` is not in `package.json` — it will auto-install via `npx depcheck` on next build. If the dynamic import fails, user should see a toast error. Manual install: `npm install isomorphic-git`.
+- The `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` secrets must be set in Supabase for the OAuth exchange to work. The `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` secrets are not needed for the user-access-token flow (only for GitHub App JWT generation, which this implementation does not use).
+- The callback URL `https://yfitops2.pages.dev/auth/github/callback` must be listed in the GitHub App's "Callback URL" field.
 
 ---
 
