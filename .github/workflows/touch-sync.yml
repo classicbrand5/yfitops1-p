@@ -1,10 +1,10 @@
-name: Touch all files to force sync
+name: Append invisible space to force sync
 
 on:
   workflow_dispatch:
 
 jobs:
-  touch-and-push:
+  refresh-all-files:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -15,11 +15,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Touch every file
+      - name: Append a zero-width space to every tracked file
         run: |
-          find . -type f \( ! -path './.git/*' \) -exec touch {} \;
+          git ls-files -z | while IFS= read -r -d '' f; do
+            if [ -f "$f" ]; then
+              printf '\u200B' >> "$f"
+            fi
+          done
 
-      - name: Commit and push to collective
+      - name: Commit and push to OnSpace collective repo
         env:
           PAT: ${{ secrets.DEPLOY_TEST_KEY }}
         run: |
@@ -27,5 +31,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add collective https://x-access-token:${PAT}@github.com/classicbrand5/YFitOps-Collective.git
           git add -A
-          git commit -m "chore: refresh all file timestamps to sync with OnSpace AI" || echo "No changes to commit"
+          git commit -m "sync: append zwsp to all tracked files to trigger OnSpace import" || echo "No changes to commit"
           git push collective --force HEAD:main
